@@ -1,0 +1,1855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signal</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; user-select:none; -webkit-user-select:none; }
+    body { background:#000; overflow:hidden; }
+    canvas { display:block; outline:none; touch-action:none; }
+    /* Suppress Firefox long-press context menu */
+    :root { -moz-user-select:none; }
+  </style>
+</head>
+<body>
+<script type="module">
+  import * as PIXI from 'https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.mjs';
+
+  const app = new PIXI.Application();
+  await app.init({ resizeTo:window, background:'#05060f', antialias:true });
+  document.body.appendChild(app.canvas);
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('touchstart', e => { if(e.touches.length>1) e.preventDefault(); }, {passive:false});
+
+  const rand  = (a,b) => a + Math.random()*(b-a);
+
+  // ─── Flavor text pool (cycles as depth increases) ────────
+  const FLAVORS = [
+    { // pool 0
+      derelict:[
+        {sub:'REGISTRY: UNKNOWN',     line:'Hull integrity 4%. Life support offline.\nNo survivors detected.',       item:'Salvage Parts'},
+        {sub:'VESSEL: HELIOS-7',       line:'Emergency beacon active.\nCargo manifest corrupted.',                    item:'Derelict Module'},
+        {sub:'FORCED ENTRY DETECTED',  line:'Collision and weapons damage.\nSomething got out.',                     item:'Damaged Tech'},
+      ],
+      asteroid:[
+        {sub:'HIGH-GRADE IRIDIUM',     line:'Significant deposits. Value: considerable.',                            item:'Iridium Ore'},
+        {sub:'ISOTOPE ANOMALY',        line:'Pattern inconsistent with solar formation.',                             item:'Exotic Mineral'},
+        {sub:'COMPOSITION UNKNOWN',    line:'Does not match any catalogued element.',                                item:'Unknown Sample'},
+      ],
+      alien:[
+        {sub:'WEAK SIGNAL DETECTED',   line:'Faint repeating pattern. Possibly artificial.',                         item:'Alien Fragment'},
+        {sub:'SMALL STRUCTURE FOUND',  line:'Non-terrestrial alloy. Small debris cluster.',                          item:'Alien Debris'},
+        {sub:'ECHO PATTERN',           line:'Signal bouncing off unknown source.\nOrigin unclear.',                  item:'Signal Echo'},
+      ],
+    },
+    { // pool 1
+      derelict:[
+        {sub:'DECOMMISSIONED WARSHIP',  line:'Military-grade hull. Weapons stripped.\nBlack box intact.',            item:'Military Salvage'},
+        {sub:'RESEARCH STATION WRECK', line:'Lab equipment partially intact.\nData cores recoverable.',              item:'Research Data'},
+        {sub:'COLONY SHIP FRAGMENT',   line:'Cryo-pod section. All pods evacuated.\nDestination unknown.',           item:'Cryo Components'},
+      ],
+      asteroid:[
+        {sub:'PRISMATIC CRYSTAL',      line:'High-refraction mineral lattice.\nRare. Handle with care.',             item:'Prisma Crystal'},
+        {sub:'DENSE METALLIC CORE',    line:'Unusually high iron-nickel ratio.\nPre-stellar formation.',             item:'Dense Ore'},
+        {sub:'VOLATILE COMPOUND',      line:'Unstable at standard pressure.\nContained successfully.',               item:'Volatile Sample'},
+      ],
+      alien:[
+        {sub:'STRUCTURED TRANSMISSION',line:'Complex signal — not random noise.\nPartially decoded.',                item:'Signal Fragment'},
+        {sub:'DORMANT PROBE',          line:'Non-terrestrial manufacture. Self-repairing.\nOrigin: deep space.',     item:'Alien Probe'},
+        {sub:'RESONANCE MARKER',       line:'Placed deliberately. Navigation beacon\nfor an unknown route.',         item:'Resonance Marker'},
+      ],
+    },
+    { // pool 2
+      derelict:[
+        {sub:'ANCIENT FREIGHTER',      line:'Hull dating exceeds 300 years.\nCargo bay still pressurised.',          item:'Antique Components'},
+        {sub:'BATTLE CRUISER WRECK',   line:'Destroyed by overwhelming force.\nArmour breached from inside.',        item:'Battle Tech'},
+        {sub:'QUARANTINE VESSEL',      line:'Biohazard seals active.\nDo not open cargo manifest.',                  item:'Sealed Container'},
+      ],
+      asteroid:[
+        {sub:'CRYSTALLINE MATRIX',     line:'Self-organising lattice.\nGrows 2mm per standard cycle.',               item:'Living Crystal'},
+        {sub:'MAGNETIC ANOMALY',       line:'Field strength 40x stellar average.\nSource: internal structure.',      item:'Magnetic Core'},
+        {sub:'ORGANIC MINERAL',        line:'Carbon-silicate hybrid compound.\nSuggests biological origin.',          item:'Bio-Mineral'},
+      ],
+      alien:[
+        {sub:'BEACON: ACTIVE',         line:'Transmitting on 7 frequencies.\nEach encodes a different warning.',     item:'Warning Beacon'},
+        {sub:'ARTIFACT CLUSTER',       line:'Arranged in precise formation.\nNot a collision pattern.',              item:'Arranged Artifact'},
+        {sub:'DIMENSIONAL ECHO',       line:'Signal exists in multiple states\nsimultaneously.',                     item:'Phase Fragment'},
+      ],
+    },
+    { // pool 3
+      derelict:[
+        {sub:'DEEP SPACE EXPLORER',    line:'Last transmission: 40 years ago.\n"Do not follow."',                    item:'Explorer Log'},
+        {sub:'CLASSIFIED VESSEL',      line:'Registry: REDACTED.\nHull markings removed.',                           item:'Classified Tech'},
+        {sub:'AUTOMATED HARVESTER',    line:'Still operating. No crew.\nSending product — to where?',                item:'Harvester Module'},
+      ],
+      asteroid:[
+        {sub:'EXOTIC MATTER DEPOSIT',  line:'Mass-negative particles detected.\nTheoretically impossible.',           item:'Exotic Matter'},
+        {sub:'TEMPORAL ANOMALY ROCK',  line:'Surface age inconsistent with\nany geological model.',                  item:'Temporal Sample'},
+        {sub:'SINGULARITY RESIDUE',    line:'Remnant of a collapsed object.\nDense beyond measurement.',              item:'Singularity Dust'},
+      ],
+      alien:[
+        {sub:'ANCIENT DISTRESS CALL',  line:'Signal predates human spaceflight.\nStill broadcasting.',               item:'Ancient Beacon'},
+        {sub:'MIND-STATE SIGNAL',      line:'Carrier wave contains structured\ncognitive patterns.',                 item:'Cognition Shard'},
+        {sub:'GRAVITY SCRIPT',         line:'Information encoded in\ngravitational wave pulses.',                    item:'Gravity Data'},
+      ],
+    },
+    { // pool 4
+      derelict:[
+        {sub:'THE VANISHED',           line:'Legendary lost ship. Found.\nCrew: present but unresponsive.',           item:'Void Salvage'},
+        {sub:'GENERATION SHIP',        line:'In flight for 800 years.\nDestination: unreachable.',                   item:'Generation Relic'},
+        {sub:'THE ARCHITECT',          line:'Blueprints found intact.\nBuilt things that should not exist.',          item:'Forbidden Plans'},
+      ],
+      asteroid:[
+        {sub:'PRIMORDIAL ORE',         line:'Pre-universe material.\nPredates stellar formation.',                   item:'Primordial Ore'},
+        {sub:'STELLAR REMNANT',        line:'White dwarf fragment.\nMass of a mountain in your palm.',               item:'Dwarf Fragment'},
+        {sub:'ANTIMATTER POCKET',      line:'Stable containment achieved.\nDo not agitate.',                         item:'Antimatter Sample'},
+      ],
+      alien:[
+        {sub:'CIVILISATION END-POINT', line:'Signal is a record of a\nspecies\' final moment.',                      item:'Last Transmission'},
+        {sub:'THE CARTOGRAPHER',       line:'Map of all systems — including\nones we haven\'t reached.',              item:'Cosmic Map'},
+        {sub:'AWAKENING SIGNAL',       line:'Not a distress call.\nA summons.',                                       item:'Summons Shard'},
+      ],
+    },
+    { // pool 5
+      derelict:[
+        {sub:'ENTITY VESSEL',          line:'Not built. Grown.\nFunctions without a power source.',                  item:'Entity Fragment'},
+        {sub:'OBSERVER CONSTRUCT',     line:'Been here longer than\nthis star system.',                              item:'Observer Piece'},
+        {sub:'THE MIRROR',             line:'Exact copy of a ship\nthat hasn\'t been built yet.',                    item:'Temporal Relic'},
+      ],
+      asteroid:[
+        {sub:'VOID MINERAL',           line:'Absorbs all wavelengths.\nCasts no shadow.',                            item:'Void Ore'},
+        {sub:'DARK MATTER CORE',       line:'Interacts only with gravity.\nBut it is here.',                         item:'Dark Matter'},
+        {sub:'NON-EUCLIDEAN SAMPLE',   line:'Surface area: infinite.\nMass: negligible.',                            item:'Fold Material'},
+      ],
+      alien:[
+        {sub:'CONTACT: ESTABLISHED',   line:'They are aware of you.\nResponse: pending.',                            item:'Contact Record'},
+        {sub:'THE ANSWER',             line:'To a question you haven\'t\nasked yet.',                                item:'Preemptive Answer'},
+        {sub:'BEYOND SIGNAL',          line:'Not transmitting. Present.\nLeave now.',                                item:'Presence Trace'},
+      ],
+    },
+    { // pool 6
+      derelict:[
+        {sub:'THE LAST SHIP',          line:'Every ship ever lost ends up here.\nYours will too.',                   item:'Terminus Relic'},
+        {sub:'ORIGIN VESSEL',          line:'The first ship ever built.\nStill operational.',                        item:'Origin Fragment'},
+        {sub:'ALL OF THEM',            line:'Sensor array overwhelmed.\nToo many to count.',                         item:'Multitude Shard'},
+      ],
+      asteroid:[
+        {sub:'VOID ESSENCE',           line:'The material between thoughts.',                                        item:'Void Essence'},
+        {sub:'COMPRESSED INFINITY',    line:'Contains more than it should.\nContains everything.',                   item:'Infinite Ore'},
+        {sub:'DIVINE SUBSTRATE',       line:'The fabric on which\nreality is printed.',                              item:'Divine Matter'},
+      ],
+      alien:[
+        {sub:'GOD SIGNAL',             line:'Not alien. Not artificial.\nOld.',                                      item:'Divine Fragment'},
+        {sub:'THE OBSERVER',           line:'Has been watching\nsince the beginning.',                               item:'Observer Record'},
+        {sub:'ANSWER TO EVERYTHING',   line:'You understand it completely.\nYou will forget.',                       item:'Transcendence Shard'},
+      ],
+    },
+    { // pool 7 — deeper horror
+      derelict:[
+        {sub:'THE WOUND',              line:'Ship bisected cleanly.\nNo debris field. Edges still warm.',            item:'Wound Fragment'},
+        {sub:'MASS GRAVE VESSEL',      line:'Crew compartments sealed from outside.\n12,000 souls.',                 item:'Grief Capsule'},
+        {sub:'THE OPENED ONE',         line:'Hull peeled back like a flower.\nSomething left in a hurry.',           item:'Breach Relic'},
+      ],
+      asteroid:[
+        {sub:'SCREAMING ROCK',         line:'Vibration analysis shows structured pulses.\nNot geological.',          item:'Resonant Stone'},
+        {sub:'CALCIFIED VESSEL',       line:'Organic material replaced mineral over time.\nWas not always rock.',    item:'Living Ore'},
+        {sub:'MEMORY DEPOSIT',         line:'Surface records external events.\nFront of file: yesterday.',           item:'Archive Stone'},
+      ],
+      alien:[
+        {sub:'THEY FOUND YOU FIRST',   line:'Signal originated from your location.\nYou did not send it.',           item:'Echo Self'},
+        {sub:'PREVIOUS OCCUPANT',      line:'Your ship\'s log pre-dates your launch.\nHandwriting not yours.',       item:'Prior Claim'},
+        {sub:'THE INVITATION',         line:'Coordinates to a location that doesn\'t exist.\nYet.',                  item:'Destination Unknown'},
+      ],
+    },
+    { // pool 8 — cosmic dread
+      derelict:[
+        {sub:'THE WAITING SHIP',       line:'Engines cold for 400 years.\nCrew seated. Facing the door.',            item:'Vigil Relic'},
+        {sub:'EATEN FROM INSIDE',      line:'Structural members intact.\nAll organic material: absent.',             item:'Hollow Frame'},
+        {sub:'SECOND SELF',            line:'Identical to your vessel in all ways.\nYour name on the manifest.',     item:'Double Shard'},
+      ],
+      asteroid:[
+        {sub:'COUNTER-ROTATING CORE',  line:'Inner mass spins opposite to outer shell.\nImpossible mechanics.',     item:'Paradox Ore'},
+        {sub:'WARM IN THE COLD',       line:'Temperature: 36.6°C.\nNo energy source detected.',                     item:'Body-Heat Stone'},
+        {sub:'TEETH',                  line:'Formation consistent with dental structures.\nScale: planetary.',       item:'Enamel Sample'},
+      ],
+      alien:[
+        {sub:'LULLABY SIGNAL',         line:'Repetitive. Soothing.\nTranslation: "Stay. Stay. Stay."',               item:'Sleep Shard'},
+        {sub:'STAR MAP: REDACTED',     line:'Shows every system catalogued.\nYours is blacked out.',                 item:'Omitted Marker'},
+        {sub:'THE CENSUS',             line:'List of all conscious beings.\nYour name: present.',                    item:'Registry Shard'},
+      ],
+    },
+    { // pool 9 — tongue-in-cheek absurdity
+      derelict:[
+        {sub:'OUT OF ORDER',           line:'Maintenance request filed: 200 years ago.\nTicket: open.',              item:'Bureaucratic Debris'},
+        {sub:'LOST PARCEL',            line:'Shipping label: fragile.\nContents: unknown.\nDelivery: overdue.',      item:'Mystery Package'},
+        {sub:'STRONGLY WORDED LETTER', line:'Addressed to "Whoever Did This".\nTone: disappointed.',                 item:'Grievance Record'},
+      ],
+      asteroid:[
+        {sub:'SUSPICIOUSLY ROUND',     line:'Natural formation. Definitely.\nPlease do not tap on it.',              item:'Suspicious Sample'},
+        {sub:'NOT A ROCK',             line:'Passes all geological tests.\nBlinks when unobserved.',                 item:'Counterfeit Ore'},
+        {sub:'THE DECOY',              line:'Designed to look exactly like an asteroid.\nDesigned by what?',         item:'Decoy Fragment'},
+      ],
+      alien:[
+        {sub:'OUT OF OFFICE REPLY',    line:'Sender unavailable.\nExpected return: heat death of universe.',         item:'Automated Response'},
+        {sub:'TERMS & CONDITIONS',     line:'By entering this sector you agree to\n[DOCUMENT TOO LONG TO DISPLAY]',  item:'Legal Fragment'},
+        {sub:'WRONG NUMBER',           line:'Signal intended for different species.\nYou weren\'t supposed to hear.',item:'Misdirected Shard'},
+      ],
+    },
+  ];
+
+  // ─── Depth identity pool (cycles after exhausted) ────────
+  const DEPTH_META = [
+    {rarity:'COMMON',       sysName:'Outer Rim'},
+    {rarity:'UNCOMMON',     sysName:'Deep Sector'},
+    {rarity:'RARE',         sysName:'Nova Reach'},
+    {rarity:'EPIC',         sysName:'The Periphery'},
+    {rarity:'LEGENDARY',    sysName:'Abyss Gate'},
+    {rarity:'EXTRATERR.',   sysName:'The Void'},
+    {rarity:'DIVINE',       sysName:'Terminus'},
+    {rarity:'CURSED',       sysName:'The Wound'},
+    {rarity:'FORSAKEN',     sysName:'Dead Shore'},
+    {rarity:'ABYSSAL',      sysName:'The Hungry Dark'},
+    {rarity:'HAUNTED',      sysName:'Echo Chamber'},
+    {rarity:'ELDRITCH',     sysName:'Screaming Void'},
+    {rarity:'UNNAMEABLE',   sysName:'Place of Eyes'},
+    {rarity:'FORBIDDEN',    sysName:'The Maw'},
+    {rarity:'NECROTIC',     sysName:'The Rot'},
+    {rarity:'SOUL-DEEP',    sysName:'The Grieving Dark'},
+    {rarity:'PROFANE',      sysName:'Blasphemy Reef'},
+    {rarity:'NIGHTMARISH',  sysName:'Wailing Expanse'},
+    {rarity:'COSMIC',       sysName:"God's Blind Spot"},
+    {rarity:'ANTEDILUVIAN', sysName:'Before The Stars'},
+    {rarity:'PRIMORDIAL',   sysName:'Before Memory'},
+    {rarity:'UNWRITTEN',    sysName:'The Unmade Place'},
+    {rarity:'SCREAMING',    sysName:'The Scream'},
+    {rarity:'HOLLOW',       sysName:'The Hollow Dark'},
+    {rarity:'DEVOURED',     sysName:'What Remains'},
+    {rarity:'INVERSE',      sysName:'Inside Out'},
+    {rarity:'UNKNOWABLE',   sysName:'No Designation'},
+    {rarity:'ABSOLUTE',     sysName:'The Absolute'},
+    {rarity:'FINAL',        sysName:'The Last Place'},
+    {rarity:'POST-FINAL',   sysName:'After The End'},
+    // tongue-in-cheek from here
+    {rarity:'STILL HERE?',  sysName:'Why Are You Here'},
+    {rarity:'IMPRESSIVE',   sysName:"You're Very Lost"},
+    {rarity:'CONCERNING',   sysName:'Please Stop'},
+    {rarity:'NIHILISTIC',   sysName:"What's The Point"},
+    {rarity:'PERSISTENT',   sysName:"You're Committed"},
+    {rarity:'STUBBORN',     sysName:'No Going Back Now'},
+    {rarity:'DEVOTED',      sysName:'Help'},
+    {rarity:'RECURSIVE',    sysName:'Same As Before'},
+    {rarity:'NOSTALGIC',    sysName:'Outer Rim Again'},
+    {rarity:'ETERNAL',      sysName:'Infinite Regress'},
+    {rarity:'RESIGNED',     sysName:'Fine. Whatever.'},
+    {rarity:'TRANSCENDENT', sysName:'Above It All'},
+    {rarity:'PHILOSOPHICAL',sysName:'Does Depth Matter?'},
+    {rarity:'LEGENDARY²',   sysName:'Double Legendary'},
+    {rarity:'MYTHIC',       sysName:'Beyond Myth'},
+    {rarity:'INEVITABLE',   sysName:'The Final Approach'},
+    {rarity:'OMEGA',        sysName:'Omega Point'},
+    {rarity:'POST-OMEGA',   sysName:'Past The Point'},
+    {rarity:'UNREACHABLE',  sysName:'The Unreachable'},
+    {rarity:'BEYOND',       sysName:'Beyond Beyond'},
+  ];
+
+  // ─── Color themes (cycles by depth) ──────────────────────
+  const COLOR_THEMES = [
+    {bg:0x04080f, stars:0xddeeff, accent:0x4499dd}, // blue
+    {bg:0x06040e, stars:0xccbbff, accent:0x7755cc}, // purple
+    {bg:0x030d08, stars:0xaaffcc, accent:0x22cc77}, // green
+    {bg:0x0e0700, stars:0xffcc88, accent:0xdd8822}, // orange
+    {bg:0x0e0200, stars:0xff9966, accent:0xdd3311}, // red
+    {bg:0x010808, stars:0x88ffee, accent:0x00ffcc}, // teal
+    {bg:0x080808, stars:0xffffff, accent:0xffffaa}, // white
+    {bg:0x0a0005, stars:0xff88dd, accent:0xdd2299}, // magenta
+    {bg:0x05080a, stars:0xaaddff, accent:0x2288cc}, // ice blue
+    {bg:0x060005, stars:0xddaaff, accent:0xaa44dd}, // violet
+  ];
+
+  const PLANET_TYPES = ['terrestrial','barren','gas_giant','gas_giant_storm','gas_giant_red','black_hole'];
+
+  // Deterministic LCG for cloud generation — same seed → same cloud shape
+  const seededRng = seed => {
+    let s = (seed ^ 0xdeadbeef) >>> 0;
+    return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 0x100000000; };
+  };
+
+  // Triadic dust-cloud palette: sky blue, mint green, lavender
+  const CLOUD_COLS = [0x88ccff, 0x88ffcc, 0xcc88ff];
+  // Softer versions used for ship tint
+  const CLOUD_TINTS= [0xaaddff, 0xaaffee, 0xddaaff];
+
+  function cfg() {
+    if(depth===0) return {
+      rarity:'HOME', sysName:'Home System',
+      bg:0x05060f, stars:0xffffff, accent:0x3388cc,
+      dockChance:1.0, hasSignals:false, planet:'terrestrial', alienChance:0, flavor:null,
+    };
+    const d=depth;
+    const meta   = DEPTH_META[(d-1) % DEPTH_META.length];
+    const colors = COLOR_THEMES[(d-1) % COLOR_THEMES.length];
+    const flavor = FLAVORS[(d-1) % FLAVORS.length];
+    const dockChance = Math.max(0.05, 0.90 * Math.pow(0.85, d-1));
+    const alienChance = Math.min(0.70, 0.05*d + 0.03);
+    const planet = PLANET_TYPES[(d-1) % PLANET_TYPES.length];
+    return { ...colors, ...meta, dockChance, hasSignals:true, planet, alienChance, flavor };
+  }
+
+  // ─── Session state ────────────────────────────────────────
+  let depth=0, fuel=100, credits=500, hull=100;
+  let cargoUpgrades=0, jumpUpgrades=5; // DEV: start with lvl 5 jump drive
+  let cloudTint=0; // 0–1 lerp for ship colour while inside cloud
+  let homeExitFrames=0; // countdown that lifts max-speed cap after a home-jump exit
+  const cloud={active:false, wx:0, wy:0, radius:0, seed:0, domTint:0xaaddff};
+  const sysStar={wx:0, wy:0}; // world position, randomised each system
+  const STAR_PARALLAX=0.025;  // moves a tiny amount — far less than even the slowest star layer
+
+  // ─── Solar flare (CME) ────────────────────────────────────
+  const WARN_CYCLE  = 65;   // frames per warning pulse
+  const WARN_RING   = 52;   // frames the warning ring expands + fades
+  const CHARGE_DUR  = 45;   // pause between last warning and main flare
+  const FLARE_EXP   = 115;  // frames for full expansion
+  const FLARE_FADE  = 60;   // frames to fade after covering screen
+  const flare = {
+    phase:'idle', timer:0, countdown:0,
+    warnsNeeded:2, sx:0, sy:0, mainR:0, maxR:0,
+  };
+  const flareCountdown = () => Math.max(320, 800 - depth*28) + Math.random()*400;
+  let systemHasPlanet=true, systemHasSignals=false;
+
+  const FUEL_PER_JUMP=20, FUEL_HOME_PER_DEPTH=10, FUEL_PER_ITEM=15;
+  const BASE_ITEM_VALUE = 50;
+  const MAX_CARGO_SLOTS = 10;
+  const MAX_JUMP_UPGRADES = 9;  // 1 base + 9 = 10 depths max
+
+  // Item sell value doubles each depth level (50 at d1, 100 at d2, 200 at d3 …)
+  const itemValue = () => Math.floor(BASE_ITEM_VALUE * Math.pow(2, Math.max(0, depth - 1)));
+  // Upgrade cost: 50, 100, 200, 300, 400 … (+100 each step after the second)
+  const upgradeCost = level => level < 2 ? 50 * (level + 1) : level * 100;
+  const cargoCapacity = () => 3 + cargoUpgrades;
+  const jumpDepths    = () => 1 + jumpUpgrades;
+
+  // ─── Ghost ships (persisted across sessions) ─────────────
+  let ghostShips = [];
+  try { ghostShips = JSON.parse(localStorage.getItem('signal_ghosts') || '[]'); } catch(_) {}
+  let activeGhosts  = [];   // { wx, wy, id, container, pulse }
+  const gScan = { active:false, id:null, progress:0 };
+  let scanMode  = 'signal'; // 'signal' | 'ghost'
+  let cardType  = 'signal'; // 'signal' | 'ghost'
+  let ghostCardPrevSigPhase = 'idle'; // sig.phase to restore after dismissing a ghost card
+  let nearGhost = null;     // closest ghost within range this frame
+  let hudMode   = 'signal'; // 'signal' | 'ghost' — tracks last applied HUD colour
+
+  // ─── System star (pinned to screen, never moves) ──────────
+  const systemStarContainer = new PIXI.Container();
+  app.stage.addChild(systemStarContainer); // added first — renders behind everything
+  let systemStarCore = null; // reference updated by buildSystemStar, pulsed each frame
+  let starPulseT = 0;
+
+  function buildSystemStar() {
+    systemStarContainer.removeChildren();
+    const c = cfg();
+
+    // Tight atmospheric shimmer only — no wide halos
+    const shimmer = new PIXI.Graphics();
+    shimmer.circle(0,0,14);  shimmer.fill({color:c.stars,  alpha:0.06});
+    shimmer.circle(0,0,8);   shimmer.fill({color:c.accent, alpha:0.15});
+    shimmer.circle(0,0,5);   shimmer.fill({color:c.accent, alpha:0.28});
+    // Very faint lens-flare cross
+    shimmer.moveTo(-38,0); shimmer.lineTo(38,0);
+    shimmer.stroke({color:c.accent, alpha:0.08, width:0.7});
+    shimmer.moveTo(-22,-8); shimmer.lineTo(22,8);
+    shimmer.stroke({color:c.stars,  alpha:0.06, width:0.5});
+
+    // Hard bright point — pulsed via .alpha each frame
+    const core = new PIXI.Graphics();
+    core.circle(0,0,5);   core.fill({color:0xffffff, alpha:0.98});
+    core.circle(0,0,2.5); core.fill({color:0xffffff, alpha:1.00});
+
+    systemStarContainer.addChild(shimmer, core);
+    systemStarCore = core;
+  }
+
+  // ─── Starfield ───────────────────────────────────────────
+  const LAYER_DEFS = [
+    {count:120,parallax:0.20,sizeMin:0.4,sizeMax:1.0,alphaMin:0.15,alphaMax:0.45},
+    {count: 70,parallax:0.50,sizeMin:0.8,sizeMax:1.8,alphaMin:0.35,alphaMax:0.70},
+    {count: 30,parallax:1.00,sizeMin:1.5,sizeMax:3.0,alphaMin:0.60,alphaMax:1.00},
+  ];
+  const starLayers = LAYER_DEFS.map(cfg_s => {
+    const container = new PIXI.Container();
+    app.stage.addChild(container);
+    const stars = Array.from({length:cfg_s.count}, () => {
+      const g = new PIXI.Graphics();
+      g.circle(0,0,rand(cfg_s.sizeMin,cfg_s.sizeMax)); g.fill({color:0xffffff});
+      g.alpha=rand(cfg_s.alphaMin,cfg_s.alphaMax);
+      g.x=rand(0,app.screen.width); g.y=rand(0,app.screen.height);
+      container.addChild(g); return g;
+    });
+    return {cfg:cfg_s, stars, container};
+  });
+
+  // Streak layer for warp motion blur — sits above stars, below everything else
+  const warpFx = new PIXI.Graphics();
+  app.stage.addChild(warpFx);
+
+  // Dust cloud — sits above warpFx, below planets/ships
+  const cloudContainer = new PIXI.Container();
+  cloudContainer.visible = false;
+  app.stage.addChild(cloudContainer);
+
+  // ─── Planet ───────────────────────────────────────────────
+  const PLANET_R = 460;
+  const planet={wx:0,wy:0}, pad={wx:0,wy:0};
+  let padFacing=0;
+
+  const planetContainer = new PIXI.Container();
+  app.stage.addChild(planetContainer);
+
+  const planetGraphics = new PIXI.Container(); // rebuilt each system
+  planetContainer.addChild(planetGraphics);
+
+  const padContainer = new PIXI.Container();
+  const padRect = new PIXI.Graphics();
+  padRect.roundRect(-34,-9,68,18,3); padRect.fill({color:0xcc8800});
+  padRect.roundRect(-34,-9,68,18,3); padRect.stroke({color:0xffcc44,width:1.5});
+  padRect.moveTo(-20,0); padRect.lineTo(20,0); padRect.stroke({color:0xffee88,alpha:0.7,width:2});
+  const padLights = new PIXI.Graphics();
+  [[-28,-5],[28,-5],[-28,5],[28,5]].forEach(([lx,ly])=>{padLights.circle(lx,ly,3);padLights.fill({color:0xffffff});});
+  padContainer.addChild(padRect, padLights);
+  planetContainer.addChild(padContainer);
+
+  function buildPlanetGraphics(type) {
+    planetGraphics.removeChildren();
+    if (!type) return;
+
+    if (type === 'terrestrial') {
+      const atmo2=new PIXI.Graphics(); atmo2.circle(0,0,PLANET_R+60); atmo2.fill({color:0x2060b0,alpha:0.08});
+      const atmo1=new PIXI.Graphics(); atmo1.circle(0,0,PLANET_R+28); atmo1.fill({color:0x3070c8,alpha:0.18});
+      const base=new PIXI.Graphics();  base.circle(0,0,PLANET_R);      base.fill({color:0x163450});
+      const land=new PIXI.Graphics();
+      [[-60,-120,90],[80,-40,70],[-140,60,55],[60,130,80],[-30,30,45]].forEach(([lx,ly,lr])=>{land.circle(lx,ly,lr);land.fill({color:0x1e5c3a,alpha:0.55});});
+      const day=new PIXI.Graphics(); day.circle(-85,-85,PLANET_R*0.82); day.fill({color:0x2e6888,alpha:0.65});
+      const shad=new PIXI.Graphics(); shad.circle(90,80,PLANET_R*0.88); shad.fill({color:0x040e1a,alpha:0.72});
+      const ice=new PIXI.Graphics();  ice.circle(0,-PLANET_R+60,75);    ice.fill({color:0xb8d8e8,alpha:0.35});
+      planetGraphics.addChild(atmo2,atmo1,base,land,day,shad,ice);
+
+    } else if (type === 'barren') {
+      const atmo=new PIXI.Graphics(); atmo.circle(0,0,PLANET_R+20); atmo.fill({color:0x443322,alpha:0.12});
+      const base=new PIXI.Graphics(); base.circle(0,0,PLANET_R);    base.fill({color:0x2e2a28});
+      const rock=new PIXI.Graphics();
+      [[-80,-100,65],[100,-30,50],[-120,80,70],[50,110,55],[20,-50,40],[-40,60,35]].forEach(([lx,ly,lr])=>{rock.circle(lx,ly,lr);rock.fill({color:0x3a3530,alpha:0.7});});
+      const craters=new PIXI.Graphics();
+      [[-60,40,28],[80,-60,20],[10,100,16],[-100,20,18]].forEach(([lx,ly,lr])=>{craters.circle(lx,ly,lr);craters.stroke({color:0x1a1816,width:3});});
+      const day=new PIXI.Graphics(); day.circle(-70,-70,PLANET_R*0.78); day.fill({color:0x3a3430,alpha:0.5});
+      const shad=new PIXI.Graphics(); shad.circle(80,80,PLANET_R*0.88);  shad.fill({color:0x0a0806,alpha:0.75});
+      planetGraphics.addChild(atmo,base,rock,craters,day,shad);
+
+    } else if (type === 'gas_giant' || type === 'gas_giant_storm' || type === 'gas_giant_red') {
+      const colors = type==='gas_giant'
+        ? {base:0x1a3a44, b1:0x2a5a64, b2:0x163035, b3:0x356070, atmo:0x40a0cc, ring:0x88bbaa}
+        : type==='gas_giant_storm'
+        ? {base:0x7a3a10, b1:0xaa5520, b2:0x6a2808, b3:0xcc7730, atmo:0xdd8833, ring:0xddaa66}
+        : {base:0x4a1008, b1:0x6a1810, b2:0x380808, b3:0x7a2010, atmo:0xcc4422, ring:0xaa6644};
+
+      // Ring behind planet
+      const ringBack=new PIXI.Graphics();
+      ringBack.ellipse(0,0,PLANET_R*1.65,PLANET_R*0.18);
+      ringBack.stroke({color:colors.ring,alpha:0.45,width:16});
+
+      const atmo=new PIXI.Graphics(); atmo.circle(0,0,PLANET_R+30); atmo.fill({color:colors.atmo,alpha:0.10});
+      const base=new PIXI.Graphics(); base.circle(0,0,PLANET_R);    base.fill({color:colors.base});
+
+      // Bands using mask
+      const bandMask=new PIXI.Graphics(); bandMask.circle(0,0,PLANET_R); bandMask.fill({color:0xffffff});
+      const bands=new PIXI.Container(); bands.mask=bandMask;
+      const fill=new PIXI.Graphics(); fill.rect(-PLANET_R,-PLANET_R,PLANET_R*2,PLANET_R*2); fill.fill({color:colors.base});
+      bands.addChild(fill);
+      [
+        [-PLANET_R*0.6, PLANET_R*0.22, colors.b1, 0.65],
+        [-PLANET_R*0.25,PLANET_R*0.18, colors.b2, 0.55],
+        [ PLANET_R*0.05,PLANET_R*0.25, colors.b3, 0.60],
+        [ PLANET_R*0.45,PLANET_R*0.20, colors.b1, 0.50],
+      ].forEach(([y,h,col,a])=>{
+        const b=new PIXI.Graphics(); b.rect(-PLANET_R,y,PLANET_R*2,h); b.fill({color:col,alpha:a}); bands.addChild(b);
+      });
+      if (type==='gas_giant_storm') {
+        // Storm eye
+        const eye=new PIXI.Graphics(); eye.circle(60,PLANET_R*0.1,38); eye.fill({color:0xff9944,alpha:0.6}); bands.addChild(eye);
+        const eye2=new PIXI.Graphics(); eye2.circle(60,PLANET_R*0.1,22); eye2.fill({color:0xffcc88,alpha:0.8}); bands.addChild(eye2);
+      }
+
+      const day=new PIXI.Graphics();  day.circle(-80,-80,PLANET_R*0.8);  day.fill({color:0xffffff,alpha:0.06});
+      const shad=new PIXI.Graphics(); shad.circle(80,80,PLANET_R*0.88);  shad.fill({color:0x000000,alpha:0.65});
+
+      // Ring in front
+      const ringFront=new PIXI.Graphics();
+      ringFront.ellipse(0,0,PLANET_R*1.65,PLANET_R*0.18);
+      ringFront.stroke({color:colors.ring,alpha:0.20,width:16});
+
+      planetGraphics.addChild(ringBack,atmo,base,bandMask,bands,day,shad,ringFront);
+
+    } else if (type === 'black_hole') {
+      const halo3=new PIXI.Graphics(); halo3.circle(0,0,PLANET_R*1.5); halo3.fill({color:0xff6600,alpha:0.05});
+      const halo2=new PIXI.Graphics(); halo2.circle(0,0,PLANET_R*1.25); halo2.fill({color:0xff8833,alpha:0.12});
+      const halo1=new PIXI.Graphics(); halo1.circle(0,0,PLANET_R*1.08); halo1.fill({color:0xffaa55,alpha:0.30});
+      const disk =new PIXI.Graphics(); disk.circle(0,0,PLANET_R*0.95);  disk.fill({color:0xffcc88,alpha:0.60});
+      const core =new PIXI.Graphics(); core.circle(0,0,PLANET_R*0.72);  core.fill({color:0x000000});
+      const lens =new PIXI.Graphics(); lens.circle(0,0,PLANET_R*0.75);  lens.stroke({color:0xffeecc,alpha:0.25,width:3});
+      planetGraphics.addChild(halo3,halo2,halo1,disk,core,lens);
+    }
+  }
+
+  function placePad() {
+    padContainer.x        = Math.cos(padFacing)*(PLANET_R+4);
+    padContainer.y        = Math.sin(padFacing)*(PLANET_R+4);
+    padContainer.rotation = padFacing + Math.PI/2;
+  }
+
+  function spawnSystem() {
+    const c = cfg();
+    // Planet + dock
+    systemHasPlanet = Math.random() < c.dockChance;
+    planetContainer.visible = systemHasPlanet;
+    if (systemHasPlanet) {
+      buildPlanetGraphics(c.planet);
+      const pa=Math.random()*Math.PI*2;
+      planet.wx=Math.cos(pa)*2400; planet.wy=Math.sin(pa)*2400;
+      padFacing=Math.atan2(-planet.wy,-planet.wx);
+      pad.wx=planet.wx+Math.cos(padFacing)*(PLANET_R+6);
+      pad.wy=planet.wy+Math.sin(padFacing)*(PLANET_R+6);
+      placePad();
+    }
+    // System star — random position near map centre
+    const sa=Math.random()*Math.PI*2, sd=3000+Math.random()*5000;
+    sysStar.wx=Math.cos(sa)*sd; sysStar.wy=Math.sin(sa)*sd;
+    // Reset flare for new system
+    flare.phase='idle'; flare.timer=0;
+    flare.countdown = depth>=2 ? flareCountdown() : 999999;
+    flareFx.clear();
+    // Ghost ships at this depth
+    spawnGhosts();
+    // Dust cloud
+    spawnCloud();
+    // Signals
+    systemHasSignals = c.hasSignals;
+    if (systemHasSignals) spawnSignal();
+    else {
+      signalContainer.visible=false;
+      sig.phase='idle';
+    }
+  }
+
+  // ─── Signal world state ──────────────────────────────────
+  const signal={wx:0,wy:0};
+  const sig={phase:'idle',type:null,scanProgress:0};
+  let flickerParts=[], alienRotSpeed=0, selectedFlavor=null;
+
+  const signalContainer=new PIXI.Container();
+  app.stage.addChild(signalContainer);
+
+  const signalVisuals=new PIXI.Container();
+  signalContainer.addChild(signalVisuals);
+
+  const sweepRing =new PIXI.Graphics(); sweepRing.circle(0,0,80);  sweepRing.stroke({color:0x00ddaa,width:1});
+  const midRing   =new PIXI.Graphics(); midRing.circle(0,0,50);    midRing.stroke({color:0x00ddaa,width:1.5});
+  const innerRing =new PIXI.Graphics(); innerRing.circle(0,0,24);  innerRing.stroke({color:0x00ffbb,width:2});
+  const centreGlow=new PIXI.Graphics(); centreGlow.circle(0,0,18); centreGlow.fill({color:0x00ffbb});
+  const qMark=new PIXI.Text({text:'?',style:{fontFamily:'monospace',fontSize:20,fontWeight:'bold',fill:'#05060f'}});
+  qMark.anchor.set(0.5,0.5);
+  signalVisuals.addChild(sweepRing,midRing,innerRing,centreGlow,qMark);
+
+  const revealedContainer=new PIXI.Container();
+  revealedContainer.visible=false;
+  signalContainer.addChild(revealedContainer);
+
+  // ─── Ghost ship layer ────────────────────────────────────
+  const ghostLayer = new PIXI.Container();
+  app.stage.addChild(ghostLayer);
+
+  // ─── Ship ────────────────────────────────────────────────
+  const shipContainer=new PIXI.Container();
+  app.stage.addChild(shipContainer);
+
+  const shipGfx=new PIXI.Graphics();
+  shipGfx.moveTo(0,-22); shipGfx.lineTo(14,18); shipGfx.lineTo(0,10); shipGfx.lineTo(-14,18);
+  shipGfx.closePath(); shipGfx.fill({color:0xffffff});
+  shipContainer.addChild(shipGfx);
+
+  const flameGfx=new PIXI.Graphics();
+  flameGfx.moveTo(-7,13); flameGfx.lineTo(0,32); flameGfx.lineTo(7,13);
+  flameGfx.closePath(); flameGfx.fill({color:0xff7700});
+  flameGfx.visible=false;
+  shipContainer.addChild(flameGfx);
+
+  const positionShip=()=>{shipContainer.x=app.screen.width/2;shipContainer.y=app.screen.height/2;};
+  positionShip();
+
+  // ─── Physics ─────────────────────────────────────────────
+  const ship={angle:0,vx:0,vy:0,wx:0,wy:0,spin:0,cargo:[null,null,null]};
+  const ROTATE_SPEED=0.055, THRUST=0.18, DRAG=0.988, MAX_SPEED=7;
+
+  const warp={active:false,vx:0,vy:0,timer:0,duration:90,flashAlpha:0,dest:'deep',pendingGameOver:false};
+  const WARP_SPEED=58, WARP_COOLDOWN=160;
+  // 90 frames (1.5 s) per depth jumped, max 15 s at 60 fps
+  const warpDuration = () => Math.min(60*15, Math.round(90 * jumpDepths()));
+  let warpCooldown=0;
+
+  // ─── Keyboard ────────────────────────────────────────────
+  const keys=new Set();
+  window.addEventListener('keydown',e=>{
+    if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    keys.add(e.key);
+    if(!e.repeat){
+      if(e.key==='e'||e.key==='E'||e.key===' '||e.key==='Enter'){
+        if(gameOverLayer.visible)                              {restart();      return;}
+        if(scanPrompt.visible&&scanMode==='ghost')             {startGhostScan();return;}
+        if(sig.phase==='revealed'&&scanPrompt.visible)         {startScan();    return;}
+        if(sig.phase==='card')                                 {dismissCard();  return;}
+        if(dockPrompt.visible)                                 {enterDock();    return;}
+        if(shipyardLayer.visible)                              {closeShipyard(); return;}
+        if(dock.active)                                        {sellAndDepart();return;}
+      }
+      if(e.key==='j'||e.key==='J') activateWarp('deep');
+      if(e.key==='h'||e.key==='H') activateWarp('home');
+    }
+  });
+  window.addEventListener('keyup',e=>keys.delete(e.key));
+  const pressed=(...n)=>n.some(k=>keys.has(k));
+
+  // ─── Joystick / thrust ───────────────────────────────────
+  const JS_R=55,JS_KNOB=22,TB_R=42;
+  const jsBase=new PIXI.Graphics();
+  jsBase.circle(0,0,JS_R); jsBase.fill({color:0xffffff,alpha:0.06});
+  jsBase.circle(0,0,JS_R); jsBase.stroke({color:0xffffff,alpha:0.22,width:2});
+  const jsKnob=new PIXI.Graphics();
+  jsKnob.circle(0,0,JS_KNOB); jsKnob.fill({color:0xffffff,alpha:0.38});
+  const thrustBtnGfx=new PIXI.Graphics();
+  thrustBtnGfx.circle(0,0,TB_R); thrustBtnGfx.fill({color:0xff7700,alpha:0.12});
+  thrustBtnGfx.circle(0,0,TB_R); thrustBtnGfx.stroke({color:0xff7700,alpha:0.55,width:2.5});
+
+  // ─── JUMP button ──────────────────────────────────────────
+  const WARP_R=36;
+  const warpBtnC=new PIXI.Graphics();
+  warpBtnC.circle(0,0,WARP_R); warpBtnC.fill({color:0x001828,alpha:0.88});
+  warpBtnC.circle(0,0,WARP_R); warpBtnC.stroke({color:0x00ccff,alpha:0.75,width:2});
+  const warpBtnL=new PIXI.Text({text:'JUMP',style:{fontFamily:'monospace',fontSize:11,fontWeight:'bold',fill:'#00ccff'}});
+  warpBtnL.anchor.set(0.5,0.5);
+  const warpBtn=new PIXI.Container(); warpBtn.addChild(warpBtnC,warpBtnL);
+
+  // ─── HOME button ──────────────────────────────────────────
+  const HOME_R=26;
+  const homeBtnC=new PIXI.Graphics();
+  homeBtnC.circle(0,0,HOME_R); homeBtnC.fill({color:0x0c1008,alpha:0.9});
+  homeBtnC.circle(0,0,HOME_R); homeBtnC.stroke({color:0x88dd44,alpha:0.75,width:1.5});
+  const homeBtnL=new PIXI.Text({text:'HOME',style:{fontFamily:'monospace',fontSize:9,fontWeight:'bold',fill:'#88dd44'}});
+  homeBtnL.anchor.set(0.5,0.4);
+  const homeCostL=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:7,fill:'#55aa22'}});
+  homeCostL.anchor.set(0.5,0); homeCostL.y=10;
+  const homeBtn=new PIXI.Container(); homeBtn.addChild(homeBtnC,homeBtnL,homeCostL);
+
+  const warpOverlay=new PIXI.Graphics();
+
+  // ─── Signal HUD (top-right) ───────────────────────────────
+  const hudC=new PIXI.Container();
+  const hudBg=new PIXI.Graphics();
+  hudBg.circle(0,0,36); hudBg.fill({color:0x000000,alpha:0.55});
+  hudBg.circle(0,0,36); hudBg.stroke({color:0x00ddaa,alpha:0.45,width:1.5});
+  const hudArrow=new PIXI.Graphics();
+  hudArrow.moveTo(0,-16); hudArrow.lineTo(9,9); hudArrow.lineTo(0,3); hudArrow.lineTo(-9,9);
+  hudArrow.closePath(); hudArrow.fill({color:0x00ffbb});
+  const distText=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#00ddaa'}});
+  distText.anchor.set(0.5,0); distText.y=42;
+  const sigLabel=new PIXI.Text({text:'SIGNAL',style:{fontFamily:'monospace',fontSize:10,fill:'#00ddaa'}});
+  sigLabel.anchor.set(0.5,1); sigLabel.y=-42;
+  hudC.addChild(hudBg,hudArrow,distText,sigLabel);
+
+  // ─── Planet HUD (top-left) ────────────────────────────────
+  const planetHud=new PIXI.Container();
+  const pHudBg=new PIXI.Graphics();
+  pHudBg.circle(0,0,36); pHudBg.fill({color:0x000000,alpha:0.55});
+  pHudBg.circle(0,0,36); pHudBg.stroke({color:0x3070c8,alpha:0.55,width:1.5});
+  const pHudArrow=new PIXI.Graphics();
+  pHudArrow.moveTo(0,-16); pHudArrow.lineTo(9,9); pHudArrow.lineTo(0,3); pHudArrow.lineTo(-9,9);
+  pHudArrow.closePath(); pHudArrow.fill({color:0x4090dd});
+  const planetDistT=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#3070c8'}});
+  planetDistT.anchor.set(0.5,0); planetDistT.y=42;
+  const planetLabelT=new PIXI.Text({text:'HOME',style:{fontFamily:'monospace',fontSize:10,fill:'#3070c8'}});
+  planetLabelT.anchor.set(0.5,1); planetLabelT.y=-42;
+  planetHud.addChild(pHudBg,pHudArrow,planetDistT,planetLabelT);
+
+  // ─── Depth / fuel HUD (top-centre) ───────────────────────
+  const depthHud=new PIXI.Container();
+  const dHudBg=new PIXI.Graphics();
+  dHudBg.roundRect(-62,-36,124,72,8); dHudBg.fill({color:0x000000,alpha:0.55});
+  dHudBg.roundRect(-62,-36,124,72,8); dHudBg.stroke({color:0x223344,alpha:0.8,width:1});
+  const depthLbl=new PIXI.Text({text:'DEPTH',style:{fontFamily:'monospace',fontSize:8,fill:'#445566'}});
+  depthLbl.anchor.set(0.5,0); depthLbl.y=-32;
+  const depthNum=new PIXI.Text({text:'0',style:{fontFamily:'monospace',fontSize:20,fontWeight:'bold',fill:'#aabbcc'}});
+  depthNum.anchor.set(0.5,0); depthNum.y=-22;
+  const rarityLbl=new PIXI.Text({text:'HOME',style:{fontFamily:'monospace',fontSize:8,fill:'#3388cc'}});
+  rarityLbl.anchor.set(0.5,0); rarityLbl.y=4;
+  const FBW=88,FBH=7;
+  const fuelBarBg=new PIXI.Graphics();
+  fuelBarBg.roundRect(-FBW/2,-FBH/2,FBW,FBH,3); fuelBarBg.fill({color:0x112233,alpha:0.9}); fuelBarBg.y=18;
+  const fuelBarFill=new PIXI.Graphics(); fuelBarFill.y=18;
+  const fuelLbl=new PIXI.Text({text:'FUEL 100%',style:{fontFamily:'monospace',fontSize:8,fill:'#44bb66'}});
+  fuelLbl.anchor.set(0.5,0); fuelLbl.y=28;
+  depthHud.addChild(dHudBg,depthLbl,depthNum,rarityLbl,fuelBarBg,fuelBarFill,fuelLbl);
+
+  const sysNameLbl=new PIXI.Text({text:'Home System',style:{fontFamily:'monospace',fontSize:8,fill:'#2a3a4a'}});
+  sysNameLbl.anchor.set(0.5,0);
+
+  // Redraws the signal compass colours — only fires on mode change
+  function applyHudMode(mode) {
+    if (hudMode === mode) return;
+    hudMode = mode;
+    const isGhost = mode === 'ghost';
+    const col = isGhost ? 0xff5533 : 0x00ffbb;
+    const dim = isGhost ? 0xcc3322 : 0x00ddaa;
+    const dimS = `#${dim.toString(16).padStart(6,'0')}`;
+    hudArrow.clear();
+    hudArrow.moveTo(0,-16); hudArrow.lineTo(9,9); hudArrow.lineTo(0,3); hudArrow.lineTo(-9,9);
+    hudArrow.closePath(); hudArrow.fill({color:col});
+    hudBg.clear();
+    hudBg.circle(0,0,36); hudBg.fill({color:0x000000,alpha:0.55});
+    hudBg.circle(0,0,36); hudBg.stroke({color:col,alpha:0.45,width:1.5});
+    distText.style.fill  = dimS;
+    sigLabel.style.fill  = dimS;
+  }
+
+  function updateDepthFuelHUD(){
+    const c=cfg();
+    depthNum.text=String(depth);
+    depthNum.style.fill=`#${c.accent.toString(16).padStart(6,'0')}`;
+    rarityLbl.text=c.rarity; rarityLbl.style.fill=`#${c.accent.toString(16).padStart(6,'0')}`;
+    sysNameLbl.text=c.sysName;
+    sysNameLbl.style.fill=depth===0?'#2a3a4a':`#${Math.floor(c.accent*0.55).toString(16).padStart(6,'0')}`;
+    const frac=fuel/100;
+    const fcol=fuel>60?0x44bb66:fuel>30?0xccaa22:0xdd3322;
+    fuelLbl.text=`FUEL ${Math.round(fuel)}%`; fuelLbl.style.fill=`#${fcol.toString(16).padStart(6,'0')}`;
+    fuelBarFill.clear();
+    if(frac>0){fuelBarFill.roundRect(-FBW/2,-FBH/2,FBW*frac,FBH,3);fuelBarFill.fill({color:fcol});}
+    const cost=depth*FUEL_HOME_PER_DEPTH;
+    homeCostL.text=depth>0?`-${cost}%`:'';
+    homeBtn.alpha=depth===0?0.3:fuel>=cost?0.85:0.35;
+    homeBtnL.style.fill=fuel>=cost&&depth>0?'#88dd44':'#446622';
+  }
+
+  // ─── Cargo HUD ────────────────────────────────────────────
+  const cargoHud=new PIXI.Container();
+  const cargoBg=new PIXI.Graphics();
+  cargoBg.roundRect(-52,-4,104,68,6); cargoBg.fill({color:0x000000,alpha:0.55});
+  cargoBg.roundRect(-52,-4,104,68,6); cargoBg.stroke({color:0x334455,alpha:0.7,width:1});
+  const cargoTitleT=new PIXI.Text({text:'CARGO',style:{fontFamily:'monospace',fontSize:9,fill:'#556677'}});
+  cargoTitleT.anchor.set(0.5,0); cargoTitleT.y=0;
+  cargoHud.addChild(cargoBg,cargoTitleT);
+  const cSlotDots=[], cSlotTexts=[];
+  for(let i=0;i<10;i++){
+    const d=new PIXI.Graphics(); d.x=-38; d.y=18+i*17; cargoHud.addChild(d); cSlotDots.push(d);
+    const t=new PIXI.Text({text:'——',style:{fontFamily:'monospace',fontSize:9,fill:'#445566'}});
+    t.anchor.set(0,0.5); t.x=-25; t.y=18+i*17; cargoHud.addChild(t); cSlotTexts.push(t);
+  }
+  function refreshCargoHud(){
+    const slots=cargoCapacity();
+    const bgH=22+slots*17;
+    cargoBg.clear();
+    cargoBg.roundRect(-52,-4,104,bgH,6); cargoBg.fill({color:0x000000,alpha:0.55});
+    cargoBg.roundRect(-52,-4,104,bgH,6); cargoBg.stroke({color:0x334455,alpha:0.7,width:1});
+    const typeOf=n=>{
+      if(!n) return null;
+      if(['Salvage Parts','Derelict Module','Damaged Tech','Military Salvage','Research Data','Cryo Components',
+          'Antique Components','Battle Tech','Sealed Container','Explorer Log','Classified Tech','Harvester Module',
+          'Void Salvage','Generation Relic','Forbidden Plans','Entity Fragment','Observer Piece','Temporal Relic',
+          'Terminus Relic','Origin Fragment','Multitude Shard'].includes(n)) return 'salvage';
+      if(['Iridium Ore','Exotic Mineral','Unknown Sample','Prisma Crystal','Dense Ore','Volatile Sample',
+          'Living Crystal','Magnetic Core','Bio-Mineral','Exotic Matter','Temporal Sample','Singularity Dust',
+          'Primordial Ore','Dwarf Fragment','Antimatter Sample','Void Ore','Dark Matter','Fold Material',
+          'Void Essence','Infinite Ore','Divine Matter'].includes(n)) return 'mineral';
+      return 'artifact';
+    };
+    const IC={salvage:0xff7744,mineral:0x88aacc,artifact:0x44ee99};
+    for(let i=0;i<10;i++){
+      const show=i<slots;
+      cSlotDots[i].visible=show; cSlotTexts[i].visible=show;
+      if(!show) continue;
+      const item=ship.cargo[i],d=cSlotDots[i],t=cSlotTexts[i];
+      d.clear();
+      if(item){const c=IC[typeOf(item)]??0x888888;d.roundRect(-5,-5,10,10,2);d.fill({color:c});t.text=item;t.style.fill=`#${c.toString(16).padStart(6,'0')}`;}
+      else{d.roundRect(-5,-5,10,10,2);d.stroke({color:0x334455,width:1});t.text='——';t.style.fill='#445566';}
+    }
+  }
+  refreshCargoHud();
+
+  // ─── Credits HUD (below cargo) ────────────────────────────
+  const creditsHud = new PIXI.Container();
+  const creditsBg  = new PIXI.Graphics();
+  creditsBg.roundRect(-52,-2,104,28,6);
+  creditsBg.fill({color:0x000000,alpha:0.55});
+  creditsBg.roundRect(-52,-2,104,28,6);
+  creditsBg.stroke({color:0x445533,alpha:0.8,width:1});
+  const creditsLabel = new PIXI.Text({text:'CREDITS',style:{fontFamily:'monospace',fontSize:8,fill:'#556644'}});
+  creditsLabel.anchor.set(0,0.5); creditsLabel.x=-44; creditsLabel.y=10;
+  const creditsValue = new PIXI.Text({text:'500',style:{fontFamily:'monospace',fontSize:11,fontWeight:'bold',fill:'#88dd66'}});
+  creditsValue.anchor.set(1,0.5); creditsValue.x=46; creditsValue.y=10;
+  creditsHud.addChild(creditsBg,creditsLabel,creditsValue);
+
+  function updateCreditsHud() {
+    const fmt = n => n>=1e9?`${(n/1e9).toFixed(1)}B`:n>=1e6?`${(n/1e6).toFixed(1)}M`:n>=10000?`${(n/1000).toFixed(1)}k`:n.toLocaleString();
+    creditsValue.text = fmt(credits);
+    creditsValue.style.fill = credits >= 1000 ? '#aaee88' : '#88dd66';
+  }
+  updateCreditsHud();
+
+  // ─── Hull HUD (upper-right, below signal compass) ────────
+  const hullHud=new PIXI.Container();
+  const hullBg=new PIXI.Graphics();
+  hullBg.roundRect(-52,-4,104,46,6); hullBg.fill({color:0x000000,alpha:0.55});
+  hullBg.roundRect(-52,-4,104,46,6); hullBg.stroke({color:0x334455,alpha:0.7,width:1});
+  const hullTitleT=new PIXI.Text({text:'HULL',style:{fontFamily:'monospace',fontSize:9,fill:'#556677'}});
+  hullTitleT.anchor.set(0.5,0); hullTitleT.y=0;
+  const HBW=88,HBH=7;
+  const hullBarBg=new PIXI.Graphics();
+  hullBarBg.roundRect(-HBW/2,-HBH/2,HBW,HBH,3); hullBarBg.fill({color:0x112233,alpha:0.9}); hullBarBg.y=18;
+  const hullBarFill=new PIXI.Graphics(); hullBarFill.y=18;
+  const hullLbl=new PIXI.Text({text:'100%',style:{fontFamily:'monospace',fontSize:8,fill:'#44bb66'}});
+  hullLbl.anchor.set(0.5,0); hullLbl.y=28;
+  hullHud.addChild(hullBg,hullTitleT,hullBarBg,hullBarFill,hullLbl);
+
+  function refreshHullHud(){
+    const frac=hull/100;
+    const fcol=hull>60?0x44bb66:hull>30?0xccaa22:0xdd3322;
+    hullLbl.text=`${Math.ceil(hull)}%`; hullLbl.style.fill=`#${fcol.toString(16).padStart(6,'0')}`;
+    hullBarFill.clear();
+    if(frac>0){hullBarFill.roundRect(-HBW/2,-HBH/2,HBW*frac,HBH,3);hullBarFill.fill({color:fcol});}
+  }
+  refreshHullHud();
+
+  // ─── Prompts ──────────────────────────────────────────────
+  function makePrompt(verb,col){
+    const c=new PIXI.Container(); c.visible=false;
+    const bg=new PIXI.Graphics();
+    bg.roundRect(-72,-24,144,48,10); bg.fill({color:0x020810,alpha:0.92});
+    bg.roundRect(-72,-24,144,48,10); bg.stroke({color:col,alpha:0.9,width:2});
+    const lbl=new PIXI.Text({text:verb,style:{fontFamily:'monospace',fontSize:17,fontWeight:'bold',fill:`#${col.toString(16).padStart(6,'0')}`}});
+    lbl.anchor.set(0.5,0.5);
+    const hint=new PIXI.Text({text:'[E / SPACE]',style:{fontFamily:'monospace',fontSize:9,fill:`#${col.toString(16).padStart(6,'0')}`,alpha:0.55}});
+    hint.anchor.set(0.5,0); hint.y=28;
+    c.addChild(bg,lbl,hint); return c;
+  }
+  const scanPrompt=makePrompt('SCAN',0x00ffbb);
+  const dockPrompt=makePrompt('DOCK',0x4090dd);
+  // Dynamic verb for scan
+  const scanVerb=scanPrompt.children[1];
+
+  // ─── Progress bar ─────────────────────────────────────────
+  const PROG_W=240,PROG_H=9;
+  const progressBar=new PIXI.Container(); progressBar.visible=false;
+  const progBg=new PIXI.Graphics();
+  progBg.roundRect(-PROG_W/2,-PROG_H/2,PROG_W,PROG_H,5); progBg.fill({color:0x000000,alpha:0.65});
+  progBg.roundRect(-PROG_W/2,-PROG_H/2,PROG_W,PROG_H,5); progBg.stroke({color:0xffffff,alpha:0.18,width:1});
+  const progFill=new PIXI.Graphics();
+  const progLabel=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#ffffff'}});
+  progLabel.anchor.set(0.5,1); progLabel.y=-PROG_H/2-8;
+  progressBar.addChild(progBg,progFill,progLabel);
+
+  // ─── Scan result card ─────────────────────────────────────
+  const CARD_W=340,CARD_H=195;
+  const cardLayer=new PIXI.Container(); cardLayer.visible=false;
+  const dimOvl=new PIXI.Graphics(), cardBox=new PIXI.Container(), cardBg=new PIXI.Graphics();
+  const cardHeader=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:12,fontWeight:'bold',fill:'#00ffbb'}});
+  cardHeader.anchor.set(0.5,0); cardHeader.y=-CARD_H/2+16;
+  const cardTitle=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:15,fontWeight:'bold',fill:'#ffffff'}});
+  cardTitle.anchor.set(0.5,0); cardTitle.y=-CARD_H/2+38;
+  const cardBody=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#99aabb',wordWrap:true,wordWrapWidth:CARD_W-50}});
+  cardBody.anchor.set(0.5,0); cardBody.y=-CARD_H/2+72;
+  const cardCargoLine=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#88cc99'}});
+  cardCargoLine.anchor.set(0.5,0); cardCargoLine.y=-CARD_H/2+128;
+  const cardDiv=new PIXI.Graphics();
+  cardDiv.moveTo(-CARD_W/2+24,CARD_H/2-44); cardDiv.lineTo(CARD_W/2-24,CARD_H/2-44);
+  cardDiv.stroke({color:0xffffff,alpha:0.1,width:1});
+  const cardCont=new PIXI.Text({text:'TAP  /  PRESS SPACE  TO CONTINUE',style:{fontFamily:'monospace',fontSize:9,fill:'#445566'}});
+  cardCont.anchor.set(0.5,1); cardCont.y=CARD_H/2-14;
+  cardBox.addChild(cardBg,cardHeader,cardTitle,cardBody,cardCargoLine,cardDiv,cardCont);
+  cardLayer.addChild(dimOvl,cardBox);
+
+  // ─── Docking panel ────────────────────────────────────────
+  const DOCK_W=340;
+  const dockLayer=new PIXI.Container(); dockLayer.visible=false;
+  const dDimOvl=new PIXI.Graphics(), dockBox=new PIXI.Container(), dockBg=new PIXI.Graphics();
+  const dockTitle=new PIXI.Text({text:'DOCKING INTERFACE',style:{fontFamily:'monospace',fontSize:13,fontWeight:'bold',fill:'#4090dd'}});
+  dockTitle.anchor.set(0.5,0);
+  const dockSub=new PIXI.Text({text:'Sell cargo to refuel  ·  +15% per item',style:{fontFamily:'monospace',fontSize:9,fill:'#445577'}});
+  dockSub.anchor.set(0.5,0);
+  const dDiv1=new PIXI.Graphics();
+  const dCargoTexts=[];
+  for(let i=0;i<10;i++){const t=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:11,fill:'#aabbcc'}});t.anchor.set(0.5,0);dockBox.addChild(t);dCargoTexts.push(t);}
+  const dDiv2=new PIXI.Graphics();
+  const sellBg=new PIXI.Graphics(); sellBg.roundRect(-90,-18,180,36,8); sellBg.fill({color:0x0a1828,alpha:0.95}); sellBg.roundRect(-90,-18,180,36,8); sellBg.stroke({color:0x44aaff,alpha:0.8,width:2});
+  const sellTxt=new PIXI.Text({text:'SELL ALL',style:{fontFamily:'monospace',fontSize:14,fontWeight:'bold',fill:'#44aaff'}}); sellTxt.anchor.set(0.5,0.5);
+  const sellBtn=new PIXI.Container(); sellBtn.addChild(sellBg,sellTxt);
+  const syardBg=new PIXI.Graphics(); syardBg.roundRect(-90,-18,180,36,8); syardBg.fill({color:0x081820,alpha:0.95}); syardBg.roundRect(-90,-18,180,36,8); syardBg.stroke({color:0x3388bb,alpha:0.8,width:1.5});
+  const syardTxt=new PIXI.Text({text:'SHIPYARD',style:{fontFamily:'monospace',fontSize:14,fontWeight:'bold',fill:'#55aacc'}}); syardTxt.anchor.set(0.5,0.5);
+  const shipyardDockBtn=new PIXI.Container(); shipyardDockBtn.addChild(syardBg,syardTxt);
+  const deptBg=new PIXI.Graphics(); deptBg.roundRect(-90,-18,180,36,8); deptBg.fill({color:0x08101c,alpha:0.95}); deptBg.roundRect(-90,-18,180,36,8); deptBg.stroke({color:0x335566,alpha:0.7,width:1.5});
+  const deptTxt=new PIXI.Text({text:'DEPART',style:{fontFamily:'monospace',fontSize:14,fontWeight:'bold',fill:'#3a6688'}}); deptTxt.anchor.set(0.5,0.5);
+  const departBtn=new PIXI.Container(); departBtn.addChild(deptBg,deptTxt);
+  dockBox.addChild(dockBg,dockTitle,dockSub,dDiv1,dDiv2,sellBtn,shipyardDockBtn,departBtn);
+  dockLayer.addChild(dDimOvl,dockBox);
+
+  // ─── Shipyard panel ───────────────────────────────────────
+  const YARD_W=340,YARD_H=330;
+  const shipyardLayer=new PIXI.Container(); shipyardLayer.visible=false;
+  const syDimOvl=new PIXI.Graphics(), syBox=new PIXI.Container(), syBg=new PIXI.Graphics();
+  syBg.roundRect(-YARD_W/2,-YARD_H/2,YARD_W,YARD_H,10); syBg.fill({color:0x04090f});
+  syBg.roundRect(-YARD_W/2,-YARD_H/2,YARD_W,YARD_H,10); syBg.stroke({color:0x3388bb,alpha:0.5,width:1.5});
+  const syTitle=new PIXI.Text({text:'SHIPYARD',style:{fontFamily:'monospace',fontSize:15,fontWeight:'bold',fill:'#55aacc'}});
+  syTitle.anchor.set(0.5,0); syTitle.y=-YARD_H/2+16;
+  const sySub=new PIXI.Text({text:'Upgrades reset on death',style:{fontFamily:'monospace',fontSize:9,fill:'#334455'}});
+  sySub.anchor.set(0.5,0); sySub.y=-YARD_H/2+36;
+  const syDiv1=new PIXI.Graphics();
+  syDiv1.moveTo(-YARD_W/2+20,-YARD_H/2+52); syDiv1.lineTo(YARD_W/2-20,-YARD_H/2+52);
+  syDiv1.stroke({color:0x3388bb,alpha:0.2,width:1});
+
+  const syCargoHead=new PIXI.Text({text:'CARGO BAY',style:{fontFamily:'monospace',fontSize:11,fontWeight:'bold',fill:'#6699aa'}});
+  syCargoHead.anchor.set(0.5,0); syCargoHead.y=-YARD_H/2+62;
+  const syCargoStatus=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:13,fill:'#aabbcc'}});
+  syCargoStatus.anchor.set(0.5,0); syCargoStatus.y=-YARD_H/2+80;
+  const syCargoCost=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:10,fill:'#556677'}});
+  syCargoCost.anchor.set(0.5,0); syCargoCost.y=-YARD_H/2+98;
+  const syCargoBtnBg=new PIXI.Graphics();
+  const syCargoBtnTxt=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:13,fontWeight:'bold',fill:'#44aaff'}});
+  syCargoBtnTxt.anchor.set(0.5,0.5);
+  const syCargoBtn=new PIXI.Container(); syCargoBtn.addChild(syCargoBtnBg,syCargoBtnTxt);
+  syCargoBtn.y=-YARD_H/2+128;
+
+  const syDiv2=new PIXI.Graphics();
+  syDiv2.moveTo(-YARD_W/2+20,-YARD_H/2+158); syDiv2.lineTo(YARD_W/2-20,-YARD_H/2+158);
+  syDiv2.stroke({color:0x3388bb,alpha:0.2,width:1});
+
+  const syJumpHead=new PIXI.Text({text:'JUMP DRIVE',style:{fontFamily:'monospace',fontSize:11,fontWeight:'bold',fill:'#6699aa'}});
+  syJumpHead.anchor.set(0.5,0); syJumpHead.y=-YARD_H/2+168;
+  const syJumpStatus=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:13,fill:'#aabbcc'}});
+  syJumpStatus.anchor.set(0.5,0); syJumpStatus.y=-YARD_H/2+186;
+  const syJumpCost=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:10,fill:'#556677'}});
+  syJumpCost.anchor.set(0.5,0); syJumpCost.y=-YARD_H/2+204;
+  const syJumpBtnBg=new PIXI.Graphics();
+  const syJumpBtnTxt=new PIXI.Text({text:'',style:{fontFamily:'monospace',fontSize:13,fontWeight:'bold',fill:'#44aaff'}});
+  syJumpBtnTxt.anchor.set(0.5,0.5);
+  const syJumpBtn=new PIXI.Container(); syJumpBtn.addChild(syJumpBtnBg,syJumpBtnTxt);
+  syJumpBtn.y=-YARD_H/2+234;
+
+  const syDiv3=new PIXI.Graphics();
+  syDiv3.moveTo(-YARD_W/2+20,-YARD_H/2+266); syDiv3.lineTo(YARD_W/2-20,-YARD_H/2+266);
+  syDiv3.stroke({color:0x3388bb,alpha:0.2,width:1});
+
+  const syBackBg=new PIXI.Graphics(); syBackBg.roundRect(-90,-18,180,36,8); syBackBg.fill({color:0x08101c,alpha:0.95}); syBackBg.roundRect(-90,-18,180,36,8); syBackBg.stroke({color:0x335566,alpha:0.7,width:1.5});
+  const syBackTxt=new PIXI.Text({text:'BACK TO DOCK',style:{fontFamily:'monospace',fontSize:12,fontWeight:'bold',fill:'#3a6688'}}); syBackTxt.anchor.set(0.5,0.5);
+  const syBackBtn=new PIXI.Container(); syBackBtn.addChild(syBackBg,syBackTxt);
+  syBackBtn.y=-YARD_H/2+298;
+
+  syBox.addChild(syBg,syTitle,sySub,syDiv1,syCargoHead,syCargoStatus,syCargoCost,syCargoBtn,
+    syDiv2,syJumpHead,syJumpStatus,syJumpCost,syJumpBtn,syDiv3,syBackBtn);
+  shipyardLayer.addChild(syDimOvl,syBox);
+
+  // ─── Game over ────────────────────────────────────────────
+  const gameOverLayer=new PIXI.Container(); gameOverLayer.visible=false;
+  const goDim=new PIXI.Graphics(), goBox=new PIXI.Container();
+  const goBg=new PIXI.Graphics();
+  goBg.roundRect(-170,-110,340,220,12); goBg.fill({color:0x04090f});
+  goBg.roundRect(-170,-110,340,220,12); goBg.stroke({color:0xdd2222,alpha:0.6,width:2});
+  const goTitle=new PIXI.Text({text:'STRANDED',style:{fontFamily:'monospace',fontSize:28,fontWeight:'bold',fill:'#dd2222'}});
+  goTitle.anchor.set(0.5,0); goTitle.y=-98;
+  const goSub=new PIXI.Text({text:'You ran out of fuel in deep space.',style:{fontFamily:'monospace',fontSize:10,fill:'#556677'}});
+  goSub.anchor.set(0.5,0); goSub.y=-54;
+  const goDepth=new PIXI.Text({text:'DEPTH REACHED:  0',style:{fontFamily:'monospace',fontSize:16,fontWeight:'bold',fill:'#aabbcc'}});
+  goDepth.anchor.set(0.5,0); goDepth.y=-24;
+  const goHint=new PIXI.Text({text:'TAP  /  PRESS SPACE  TO RESTART',style:{fontFamily:'monospace',fontSize:9,fill:'#445566'}});
+  goHint.anchor.set(0.5,1); goHint.y=106;
+  goBox.addChild(goBg,goTitle,goSub,goDepth,goHint);
+  gameOverLayer.addChild(goDim,goBox);
+
+  // Flare overlay — above all world layers, below UI
+  const flareFx = new PIXI.Graphics();
+  app.stage.addChild(flareFx);
+
+  // ─── UI layer ─────────────────────────────────────────────
+  const uiLayer=new PIXI.Container();
+  uiLayer.addChild(jsBase,jsKnob,thrustBtnGfx,warpBtn,homeBtn,
+    hudC,planetHud,depthHud,cargoHud,creditsHud,hullHud,sysNameLbl,
+    scanPrompt,dockPrompt,progressBar,cardLayer,dockLayer,shipyardLayer,gameOverLayer,
+    warpOverlay);
+  app.stage.addChild(uiLayer);
+
+  const positionUI=()=>{
+    const W=app.screen.width,H=app.screen.height;
+    jsBase.x=jsKnob.x=85;   jsBase.y=jsKnob.y=H-90;
+    thrustBtnGfx.x=W-80;    thrustBtnGfx.y=H-90;
+    warpBtn.x=W/2;           warpBtn.y=H-90;
+    homeBtn.x=W/2;           homeBtn.y=H-158;
+    hudC.x=W-60;             hudC.y=70;
+    hullHud.x=W-60;          hullHud.y=132;
+    planetHud.x=60;          planetHud.y=70;
+    depthHud.x=W/2;          depthHud.y=46;
+    cargoHud.x=60;           cargoHud.y=132;
+    creditsHud.x=60;         creditsHud.y=208;
+    sysNameLbl.x=W/2;        sysNameLbl.y=110;
+    scanPrompt.x=W/2;        scanPrompt.y=H-168;
+    dockPrompt.x=W/2;        dockPrompt.y=H-168;
+    progressBar.x=W/2;       progressBar.y=H/2-10;
+    cardBox.x=W/2;           cardBox.y=H/2;
+    dockBox.x=W/2;           dockBox.y=H/2;
+    syBox.x=W/2;             syBox.y=H/2;
+    goBox.x=W/2;             goBox.y=H/2;
+    dimOvl.clear(); dimOvl.rect(0,0,W,H); dimOvl.fill({color:0x000000,alpha:0.78});
+    dDimOvl.clear(); dDimOvl.rect(0,0,W,H); dDimOvl.fill({color:0x000000,alpha:0.82});
+    syDimOvl.clear(); syDimOvl.rect(0,0,W,H); syDimOvl.fill({color:0x000000,alpha:0.82});
+    goDim.clear(); goDim.rect(0,0,W,H); goDim.fill({color:0x000000,alpha:0.88});
+  };
+  positionUI();
+
+  // ─── Touch input ─────────────────────────────────────────
+  const jState={active:false,pid:null,dx:0,dy:0};
+  const tState={active:false,pid:null};
+  const hitJS   =(x,y)=>Math.hypot(x-jsBase.x,      y-jsBase.y)      <JS_R+30;
+  const hitTB   =(x,y)=>Math.hypot(x-thrustBtnGfx.x,y-thrustBtnGfx.y)<TB_R+20;
+  const hitWarp =(x,y)=>Math.hypot(x-warpBtn.x,     y-warpBtn.y)     <WARP_R+22;
+  const hitHome =(x,y)=>Math.hypot(x-homeBtn.x,     y-homeBtn.y)     <HOME_R+22;
+  const hitScan =(x,y)=>Math.abs(x-scanPrompt.x)<82 &&Math.abs(y-scanPrompt.y)<34;
+  const hitDock =(x,y)=>Math.abs(x-dockPrompt.x)<82 &&Math.abs(y-dockPrompt.y)<34;
+  const hitSell =(x,y)=>Math.abs(x-dockBox.x)<100   &&Math.abs(y-(dockBox.y+sellBtn.y))<26;
+  const hitDept =(x,y)=>Math.abs(x-dockBox.x)<100   &&Math.abs(y-(dockBox.y+departBtn.y))<26;
+  const hitSYardDock=(x,y)=>Math.abs(x-dockBox.x)<100&&Math.abs(y-(dockBox.y+shipyardDockBtn.y))<26;
+  const hitSYCargo  =(x,y)=>Math.abs(x-syBox.x)<100 &&Math.abs(y-(syBox.y+syCargoBtn.y))<26;
+  const hitSYJump   =(x,y)=>Math.abs(x-syBox.x)<100 &&Math.abs(y-(syBox.y+syJumpBtn.y))<26;
+  const hitSYBack   =(x,y)=>Math.abs(x-syBox.x)<100 &&Math.abs(y-(syBox.y+syBackBtn.y))<26;
+
+  app.canvas.style.touchAction='none';
+  app.canvas.addEventListener('pointerdown',e=>{
+    const{clientX:x,clientY:y}=e;
+    if(gameOverLayer.visible){restart();e.preventDefault();return;}
+    if(shipyardLayer.visible){
+      if(hitSYCargo(x,y)){buyCargoUpgrade();e.preventDefault();return;}
+      if(hitSYJump(x,y)){buyJumpUpgrade();e.preventDefault();return;}
+      if(hitSYBack(x,y)){closeShipyard();e.preventDefault();return;}
+      e.preventDefault();return;
+    }
+    if(dockLayer.visible){
+      if(hitSell(x,y)){sellAll();e.preventDefault();return;}
+      if(hitSYardDock(x,y)){openShipyard();e.preventDefault();return;}
+      if(hitDept(x,y)){depart(); e.preventDefault();return;}
+      e.preventDefault();return;
+    }
+    if(cardLayer.visible){dismissCard();e.preventDefault();return;}
+    if(dockPrompt.visible&&hitDock(x,y)){enterDock();e.preventDefault();return;}
+    if(scanPrompt.visible&&hitScan(x,y)){
+      if(scanMode==='ghost') startGhostScan(); else startScan();
+      e.preventDefault();return;
+    }
+    if(hitHome(x,y)){activateWarp('home');e.preventDefault();return;}
+    if(hitWarp(x,y)){activateWarp('deep');e.preventDefault();return;}
+    if(!jState.active&&hitJS(x,y)){jState.active=true;jState.pid=e.pointerId;jState.dx=0;jState.dy=0;}
+    else if(!tState.active&&hitTB(x,y)){tState.active=true;tState.pid=e.pointerId;}
+    e.preventDefault();
+  },{passive:false});
+  app.canvas.addEventListener('pointermove',e=>{
+    if(jState.active&&e.pointerId===jState.pid){
+      const rx=e.clientX-jsBase.x,ry=e.clientY-jsBase.y;
+      const d=Math.min(Math.hypot(rx,ry),JS_R),a=Math.atan2(ry,rx);
+      jsKnob.x=jsBase.x+Math.cos(a)*d;jsKnob.y=jsBase.y+Math.sin(a)*d;
+      jState.dx=rx/JS_R;jState.dy=ry/JS_R;
+    }
+    e.preventDefault();
+  },{passive:false});
+  const endP=e=>{
+    if(jState.active&&e.pointerId===jState.pid){jState.active=false;jState.pid=null;jState.dx=0;jState.dy=0;jsKnob.x=jsBase.x;jsKnob.y=jsBase.y;}
+    if(tState.active&&e.pointerId===tState.pid){tState.active=false;tState.pid=null;}
+  };
+  app.canvas.addEventListener('pointerup',endP);
+  app.canvas.addEventListener('pointercancel',endP);
+
+  // ─── Reveal builders ─────────────────────────────────────
+  const TYPE_COLOR ={derelict:0xff6655,asteroid:0xaabbc8,alien:0x00ff88};
+  const TYPE_LABEL ={derelict:'DERELICT VESSEL',asteroid:'METAL ASTEROID',alien:'ALIEN SIGNAL'};
+  const SCAN_VERBS ={derelict:'SALVAGE',asteroid:'SCAN',alien:'ANALYSE'};
+  const SCAN_ACTIVE={derelict:'SALVAGING...',asteroid:'SCANNING...',alien:'ANALYSING...'};
+
+  function buildDerelict(){
+    const hull=new PIXI.Graphics();
+    hull.moveTo(0,-26);hull.lineTo(18,4);hull.lineTo(13,24);hull.lineTo(-9,24);hull.lineTo(-20,6);hull.closePath();
+    hull.fill({color:0x253040});hull.stroke({color:0x4a6275,width:1.5});
+    const wing=new PIXI.Graphics();
+    wing.moveTo(0,0);wing.lineTo(26,-14);wing.lineTo(30,8);wing.lineTo(8,14);wing.closePath();
+    wing.fill({color:0x1a2530});wing.stroke({color:0x3a5565,width:1});wing.x=22;wing.y=-4;
+    [[-32,10,[0,0,7,2,5,9,-2,7]],[18,30,[0,0,10,3,7,11,-3,8]],[-18,-32,[0,0,6,0,4,7]]].forEach(([ox,oy,pts])=>{
+      const d=new PIXI.Graphics();d.moveTo(pts[0],pts[1]);
+      for(let i=2;i<pts.length;i+=2)d.lineTo(pts[i],pts[i+1]);
+      d.closePath();d.fill({color:0x2a404f});d.x=ox;d.y=oy;revealedContainer.addChild(d);
+    });
+    revealedContainer.addChild(hull,wing);flickerParts=[hull,wing];
+  }
+  function buildAsteroid(){
+    const N=10;
+    const v=Array.from({length:N},(_,i)=>{const a=(i/N)*Math.PI*2+rand(-0.28,0.28),r=rand(26,50);return[r*Math.cos(a),r*Math.sin(a)];});
+    const body=new PIXI.Graphics();body.moveTo(v[0][0],v[0][1]);
+    for(let i=1;i<N;i++)body.lineTo(v[i][0],v[i][1]);
+    body.closePath();body.fill({color:0x7a8c9a});body.stroke({color:0xa8bbc8,width:1.5});
+    const inn=new PIXI.Graphics();inn.moveTo(v[0][0]*0.5,v[0][1]*0.5);
+    for(let i=1;i<N;i++)inn.lineTo(v[i][0]*0.5,v[i][1]*0.5);
+    inn.closePath();inn.fill({color:0x9fb0bc,alpha:0.35});
+    [[-12,-8,8],[14,12,6],[-5,20,5]].forEach(([cx,cy,cr])=>{const c=new PIXI.Graphics();c.circle(cx,cy,cr);c.stroke({color:0x566672,width:1.5});revealedContainer.addChild(c);});
+    revealedContainer.addChild(body,inn);
+  }
+  function buildAlien(){
+    const glow=new PIXI.Graphics();glow.circle(0,0,70);glow.fill({color:0x00ff88,alpha:0.05});
+    const hPts=Array.from({length:6},(_,i)=>{const a=(i/6)*Math.PI*2-Math.PI/6;return[50*Math.cos(a),50*Math.sin(a)];});
+    const hex=new PIXI.Graphics();hex.moveTo(hPts[0][0],hPts[0][1]);
+    for(let i=1;i<6;i++)hex.lineTo(hPts[i][0],hPts[i][1]);
+    hex.closePath();hex.stroke({color:0x00ff88,width:1.5});hex.fill({color:0x00ff88,alpha:0.06});
+    const tri=new PIXI.Graphics();tri.moveTo(0,-28);tri.lineTo(24,14);tri.lineTo(-24,14);tri.closePath();
+    tri.stroke({color:0x00ff88,width:2});tri.fill({color:0x00ff88,alpha:0.08});tri.rotation=0.42;
+    const cross=new PIXI.Graphics();cross.moveTo(-22,0);cross.lineTo(22,0);cross.moveTo(0,-22);cross.lineTo(0,22);
+    cross.stroke({color:0x00ff88,alpha:0.35,width:1});
+    const eye=new PIXI.Graphics();eye.circle(0,0,6);eye.fill({color:0x00ff88});
+    revealedContainer.addChild(glow,hex,tri,cross,eye);alienRotSpeed=0.003+Math.random()*0.003;
+  }
+
+  // ─── Signal state transitions ─────────────────────────────
+  function reveal(){
+    const c=cfg();
+    const roll=Math.random();
+    sig.type=roll<c.alienChance?'alien':roll<c.alienChance+0.45?'derelict':'asteroid';
+    sig.phase='revealed';
+    revealedContainer.removeChildren();flickerParts=[];
+    if(sig.type==='derelict')buildDerelict();
+    else if(sig.type==='asteroid')buildAsteroid();
+    else buildAlien();
+    signalVisuals.visible=false;revealedContainer.visible=true;
+    const col=`#${TYPE_COLOR[sig.type].toString(16).padStart(6,'0')}`;
+    sigLabel.text=TYPE_LABEL[sig.type];sigLabel.style.fill=col;
+    distText.text='— CONTACT —';distText.style.fill=col;
+    scanVerb.text=SCAN_VERBS[sig.type];
+  }
+
+  function startScan(){
+    if(sig.phase!=='revealed')return;
+    sig.phase='scanning';sig.scanProgress=0;ship.vx=ship.vy=0;
+    const flavor=cfg().flavor;
+    const pool=flavor[sig.type];
+    selectedFlavor=pool[Math.floor(Math.random()*pool.length)];
+    progLabel.text=SCAN_ACTIVE[sig.type];
+    scanPrompt.visible=false;progressBar.visible=true;
+  }
+
+  function completeScan(){
+    sig.phase='card';progressBar.visible=false;
+    const col=TYPE_COLOR[sig.type],colS=`#${col.toString(16).padStart(6,'0')}`;
+    cardBg.clear();
+    cardBg.roundRect(-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10);cardBg.fill({color:0x040a12});
+    cardBg.roundRect(-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10);cardBg.stroke({color:col,alpha:0.45,width:1.5});
+    cardHeader.text=TYPE_LABEL[sig.type];cardHeader.style.fill=colS;
+    cardTitle.text=selectedFlavor.sub;cardBody.text=selectedFlavor.line;
+    const item=selectedFlavor.item,slot=ship.cargo.findIndex(s=>s===null);
+    if(slot!==-1){ship.cargo[slot]=item;refreshCargoHud();cardCargoLine.text=`▸ ${item} added to cargo  (${itemValue()} cr)`;cardCargoLine.style.fill='#66cc88';}
+    else{cardCargoLine.text='▸ Cargo full — sell at planet first';cardCargoLine.style.fill='#cc6644';}
+    cardLayer.visible=true;
+  }
+
+  function dismissCard(){
+    if(sig.phase!=='card')return;
+    cardLayer.visible=false;
+    if(cardType==='signal') spawnSignal();
+    else sig.phase=ghostCardPrevSigPhase; // restore signal state so uiLock clears
+  }
+
+  // ─── Dust cloud ──────────────────────────────────────────
+  function buildCloudGraphics(seed, radius) {
+    cloudContainer.removeChildren();
+    const rng = seededRng(seed);
+    const g = new PIXI.Graphics();
+
+    // Three large soft base layers, one per color
+    for(let i=0;i<3;i++){
+      const r=radius*(0.6+rng()*0.4);
+      const ox=(rng()-0.5)*radius*0.22; const oy=(rng()-0.5)*radius*0.22;
+      g.ellipse(ox,oy,r,r*(0.75+rng()*0.25));
+      g.fill({color:CLOUD_COLS[i],alpha:0.028+rng()*0.018});
+    }
+    // Medium blobs
+    for(let i=0;i<65;i++){
+      const a=rng()*Math.PI*2, d=Math.sqrt(rng())*radius*0.88;
+      const r=radius*(0.055+rng()*0.17);
+      const col=CLOUD_COLS[Math.floor(rng()*3)];
+      g.circle(Math.cos(a)*d,Math.sin(a)*d,r);
+      g.fill({color:col,alpha:0.025+rng()*0.065});
+    }
+    // Small dense wisps
+    for(let i=0;i<110;i++){
+      const a=rng()*Math.PI*2, d=Math.pow(rng(),0.55)*radius*0.82;
+      const r=radius*(0.012+rng()*0.055);
+      const col=CLOUD_COLS[Math.floor(rng()*3)];
+      g.circle(Math.cos(a)*d,Math.sin(a)*d,r);
+      g.fill({color:col,alpha:0.04+rng()*0.08});
+    }
+    // Bright concentrated knots
+    for(let i=0;i<28;i++){
+      const a=rng()*Math.PI*2, d=Math.pow(rng(),0.7)*radius*0.65;
+      const r=radius*(0.006+rng()*0.022);
+      const col=CLOUD_COLS[Math.floor(rng()*3)];
+      g.circle(Math.cos(a)*d,Math.sin(a)*d,r);
+      g.fill({color:col,alpha:0.12+rng()*0.18});
+    }
+    cloudContainer.addChild(g);
+  }
+
+  function spawnCloud(){
+    if(depth<=3){ cloud.active=false; cloudContainer.visible=false; return; }
+    const chance=Math.min(0.82, 0.14*(depth-3));
+    if(Math.random()>chance){ cloud.active=false; cloudContainer.visible=false; return; }
+    cloud.active=true;
+    cloud.wx=0; cloud.wy=0; // centred on system origin
+    cloud.radius=Math.min(3400, 2800+depth*60);
+    cloud.seed=Math.floor(Math.random()*0xffffff);
+    cloud.domTint=CLOUD_TINTS[cloud.seed%3];
+    buildCloudGraphics(cloud.seed, cloud.radius);
+    cloudContainer.x=app.screen.width/2; cloudContainer.y=app.screen.height/2;
+    cloudContainer.visible=true;
+  }
+
+  function spawnSignal(){
+    const a=Math.random()*Math.PI*2,d=900+Math.random()*400;
+    signal.wx=ship.wx+Math.cos(a)*d;signal.wy=ship.wy+Math.sin(a)*d;
+    sig.phase='signal';sig.type=null;sig.scanProgress=0;
+    selectedFlavor=null;flickerParts=[];pulseTime=0;
+    signalContainer.visible=true;signalVisuals.visible=true;
+    revealedContainer.visible=false;revealedContainer.removeChildren();signalContainer.alpha=0;
+    sigLabel.text='SIGNAL';sigLabel.style.fill='#00ddaa';distText.text='';distText.style.fill='#00ddaa';
+  }
+
+  // ─── Docking ─────────────────────────────────────────────
+  const dock={active:false};
+  function openDockPanel(){
+    const slots=cargoCapacity();
+    const DROW=18;
+    // panel height: header(64) + cargo(slots*DROW) + gap+buttons(168)
+    const dH=64+slots*DROW+168;
+    const dHalf=dH/2;
+    dockBg.clear();
+    dockBg.roundRect(-DOCK_W/2,-dHalf,DOCK_W,dH,10);dockBg.fill({color:0x04090f});
+    dockBg.roundRect(-DOCK_W/2,-dHalf,DOCK_W,dH,10);dockBg.stroke({color:0x4090dd,alpha:0.5,width:1.5});
+    dockTitle.y=-dHalf+16;
+    dockSub.y  =-dHalf+36;
+    dDiv1.clear();
+    dDiv1.moveTo(-DOCK_W/2+20,-dHalf+52);dDiv1.lineTo(DOCK_W/2-20,-dHalf+52);
+    dDiv1.stroke({color:0x4090dd,alpha:0.2,width:1});
+    const val=itemValue();
+    let totalCr=0;
+    for(let i=0;i<10;i++){
+      const t=dCargoTexts[i];
+      t.visible=i<slots;
+      t.y=-dHalf+64+i*DROW;
+      if(i<slots){
+        const item=ship.cargo[i];
+        if(item){totalCr+=val;t.text=`  ${i+1}.  ${item}  · ${val} cr`;t.style.fill='#aabbdd';}
+        else    {t.text=`  ${i+1}.  — empty —`;t.style.fill='#334455';}
+      }
+    }
+    const cargoEnd=-dHalf+64+slots*DROW;
+    dDiv2.clear();
+    dDiv2.moveTo(-DOCK_W/2+20,cargoEnd+8);dDiv2.lineTo(DOCK_W/2-20,cargoEnd+8);
+    dDiv2.stroke({color:0x4090dd,alpha:0.2,width:1});
+    sellBtn.y         =cargoEnd+8+26;
+    shipyardDockBtn.y =cargoEnd+8+26+46;
+    departBtn.y       =cargoEnd+8+26+46+46;
+    dockSub.text=totalCr>0
+      ?`Sell for ${totalCr} cr  ·  +fuel per item`
+      :'No cargo to sell  ·  Dock for rest';
+  }
+  function enterDock(){hull=100;refreshHullHud();dock.active=true;ship.vx=ship.vy=0;dockPrompt.visible=false;openDockPanel();dockLayer.visible=true;}
+  function sellAll(){
+    let fuelGain=0, creditGain=0;
+    ship.cargo.forEach(item=>{
+      if(!item) return;
+      fuelGain   += item==='Ship Loot' ? 100 : FUEL_PER_ITEM;
+      creditGain += itemValue();
+    });
+    fuel    = Math.min(100, fuel+fuelGain);
+    credits += creditGain;
+    ship.cargo=Array(cargoCapacity()).fill(null);
+    refreshCargoHud(); updateCreditsHud(); updateDepthFuelHUD(); openDockPanel();
+  }
+  function depart(){dock.active=false;dockLayer.visible=false;}
+  function sellAndDepart(){if(ship.cargo.some(s=>s!==null))sellAll();else depart();}
+
+  // ─── Shipyard ─────────────────────────────────────────────
+  function refreshShipyard(){
+    const maxCargo=MAX_CARGO_SLOTS-3; // max cargoUpgrades
+    const cargoMaxed=cargoUpgrades>=maxCargo;
+    const jumpMaxed=jumpUpgrades>=MAX_JUMP_UPGRADES;
+
+    syCargoStatus.text=`${cargoCapacity()} / ${MAX_CARGO_SLOTS} slots`;
+    if(cargoMaxed){
+      syCargoCost.text='FULLY UPGRADED';syCargoCost.style.fill='#446655';
+      syCargoBtnBg.clear();syCargoBtnBg.roundRect(-90,-18,180,36,8);syCargoBtnBg.fill({color:0x0a0f0a,alpha:0.9});syCargoBtnBg.roundRect(-90,-18,180,36,8);syCargoBtnBg.stroke({color:0x224433,alpha:0.6,width:1.5});
+      syCargoBtnTxt.text='MAXED';syCargoBtnTxt.style.fill='#335544';
+    }else{
+      const cost=upgradeCost(cargoUpgrades);
+      syCargoCost.text=`Next upgrade: ${cost} cr`;syCargoCost.style.fill=credits>=cost?'#556677':'#663322';
+      syCargoBtnBg.clear();syCargoBtnBg.roundRect(-90,-18,180,36,8);syCargoBtnBg.fill({color:0x0a1828,alpha:0.95});syCargoBtnBg.roundRect(-90,-18,180,36,8);syCargoBtnBg.stroke({color:credits>=cost?0x44aaff:0x553333,alpha:0.8,width:1.5});
+      syCargoBtnTxt.text=`UPGRADE  –${cost} cr`;syCargoBtnTxt.style.fill=credits>=cost?'#44aaff':'#664444';
+    }
+
+    syJumpStatus.text=`×${jumpDepths()} depth${jumpDepths()>1?'s':''} / jump`;
+    if(jumpMaxed){
+      syJumpCost.text='FULLY UPGRADED';syJumpCost.style.fill='#446655';
+      syJumpBtnBg.clear();syJumpBtnBg.roundRect(-90,-18,180,36,8);syJumpBtnBg.fill({color:0x0a0f0a,alpha:0.9});syJumpBtnBg.roundRect(-90,-18,180,36,8);syJumpBtnBg.stroke({color:0x224433,alpha:0.6,width:1.5});
+      syJumpBtnTxt.text='MAXED';syJumpBtnTxt.style.fill='#335544';
+    }else{
+      const cost=upgradeCost(jumpUpgrades);
+      syJumpCost.text=`Next upgrade: ${cost} cr`;syJumpCost.style.fill=credits>=cost?'#556677':'#663322';
+      syJumpBtnBg.clear();syJumpBtnBg.roundRect(-90,-18,180,36,8);syJumpBtnBg.fill({color:0x0a1828,alpha:0.95});syJumpBtnBg.roundRect(-90,-18,180,36,8);syJumpBtnBg.stroke({color:credits>=cost?0x44aaff:0x553333,alpha:0.8,width:1.5});
+      syJumpBtnTxt.text=`UPGRADE  –${cost} cr`;syJumpBtnTxt.style.fill=credits>=cost?'#44aaff':'#664444';
+    }
+  }
+  function openShipyard(){
+    dockLayer.visible=false;shipyardLayer.visible=true;refreshShipyard();
+  }
+  function closeShipyard(){
+    shipyardLayer.visible=false;dockLayer.visible=true;
+  }
+  function buyCargoUpgrade(){
+    const maxCargo=MAX_CARGO_SLOTS-3;
+    if(cargoUpgrades>=maxCargo)return;
+    const cost=upgradeCost(cargoUpgrades);
+    if(credits<cost)return;
+    credits-=cost;cargoUpgrades++;
+    ship.cargo.push(null);
+    refreshCargoHud();updateCreditsHud();refreshShipyard();
+  }
+  function buyJumpUpgrade(){
+    if(jumpUpgrades>=MAX_JUMP_UPGRADES)return;
+    const cost=upgradeCost(jumpUpgrades);
+    if(credits<cost)return;
+    credits-=cost;jumpUpgrades++;
+    updateCreditsHud();refreshShipyard();
+  }
+
+  // ─── Warp / jump ─────────────────────────────────────────
+  function activateWarp(dest){
+    if(warp.active||warpCooldown>0)return;
+    if(sig.phase==='scanning'||sig.phase==='card'||dock.active)return;
+    if(dest==='home'&&depth===0)return;
+    if(dest==='home'){const cost=depth*FUEL_HOME_PER_DEPTH;if(fuel<cost)return;fuel=Math.max(0,fuel-cost);}
+    else{fuel=Math.max(0,fuel-FUEL_PER_JUMP);}
+    updateDepthFuelHUD();
+    warp.active=true;warp.timer=0;warp.dest=dest;warp.duration=warpDuration();
+    scanPrompt.visible=false;dockPrompt.visible=false;
+    warp.vx=Math.sin(ship.angle)*WARP_SPEED;warp.vy=-Math.cos(ship.angle)*WARP_SPEED;
+    ship.vx=warp.vx;ship.vy=warp.vy;
+  }
+
+  function completeJump(){
+    warp.active=false;warp.flashAlpha=1.0;warpCooldown=WARP_COOLDOWN;
+    depth=warp.dest==='home'?0:depth+jumpDepths();
+    ship.wx=0;ship.wy=0;ship.vx=0;ship.vy=0;
+    cloudTint=0;shipContainer.tint=0xffffff;shipContainer.scale.set(1,1);
+    if(warp.dest==='home'){
+      // Spat out in the direction the ship was facing — high velocity + heavy tumble
+      const spd=18+Math.random()*12; // 18–30 u/frame
+      ship.vx=Math.sin(ship.angle)*spd; ship.vy=-Math.cos(ship.angle)*spd;
+      // 2–3 full rotations: spin_0 / (1-0.976) ≈ spin_0 * 41.7 total radians
+      ship.spin=(Math.random()<0.5?1:-1)*(0.30+Math.random()*0.15);
+      homeExitFrames=120; // 2 s of lifted speed cap
+    } else { ship.spin=0; homeExitFrames=0; }
+    spawnSystem();applyDepthTheme();updateDepthFuelHUD();
+    if(fuel<=0)warp.pendingGameOver=true;
+  }
+
+  function applyDepthTheme(){
+    const c=cfg();
+    app.renderer.background.color=c.bg;
+    starLayers.forEach(l=>l.container.tint=c.stars);
+    hudC.visible=systemHasSignals;
+    planetHud.visible=systemHasPlanet;
+    buildSystemStar();
+  }
+
+  // ─── Ghost ship functions ─────────────────────────────────
+  function recordDeath() {
+    const a=Math.random()*Math.PI*2, d=400+Math.random()*700;
+    const ghost={ depth, wx:Math.cos(a)*d, wy:Math.sin(a)*d,
+                  credits,
+                  id:`${Date.now()}_${Math.random().toString(36).slice(2,7)}` };
+    ghostShips.push(ghost);
+    if(ghostShips.length>30) ghostShips=ghostShips.slice(-30);
+    try{ localStorage.setItem('signal_ghosts',JSON.stringify(ghostShips)); }catch(_){}
+  }
+
+  function buildGhostVisual(container) {
+    // Pulsing distress rings (red/orange)
+    const r1=new PIXI.Graphics(); r1.circle(0,0,72); r1.stroke({color:0xff4422,width:1}); container.addChild(r1);
+    const r2=new PIXI.Graphics(); r2.circle(0,0,44); r2.stroke({color:0xff6633,width:1.5}); container.addChild(r2);
+    // Broken ship silhouette
+    const hull=new PIXI.Graphics();
+    hull.moveTo(0,-18); hull.lineTo(11,14); hull.lineTo(0,8); hull.lineTo(-11,14); hull.closePath();
+    hull.stroke({color:0xff6644,width:2}); hull.fill({color:0xff4422,alpha:0.15}); container.addChild(hull);
+    // Debris
+    const deb=new PIXI.Graphics();
+    [[-18,-22,4],[22,-8,3],[16,20,3],[-14,18,4]].forEach(([dx,dy,dr])=>{
+      deb.circle(dx,dy,dr); deb.fill({color:0xdd4422,alpha:0.7});
+    });
+    container.addChild(deb);
+    // SOS label
+    const sos=new PIXI.Text({text:'SOS',style:{fontFamily:'monospace',fontSize:9,fontWeight:'bold',fill:'#ff5533'}});
+    sos.anchor.set(0.5,0); sos.y=30; container.addChild(sos);
+  }
+
+  function spawnGhosts() {
+    clearGhosts();
+    const matching = ghostShips.filter(g=>g.depth===depth);
+    for(const g of matching){
+      const c=new PIXI.Container();
+      buildGhostVisual(c);
+      ghostLayer.addChild(c);
+      activeGhosts.push({wx:g.wx, wy:g.wy, id:g.id, container:c, pulse:Math.random()*Math.PI*2});
+    }
+  }
+
+  function clearGhosts() {
+    for(const g of activeGhosts) ghostLayer.removeChild(g.container);
+    activeGhosts=[];
+    gScan.active=false; gScan.id=null; gScan.progress=0;
+    hudMode=''; // force colour refresh on next spawn
+  }
+
+  function startGhostScan() {
+    if(!nearGhost||gScan.active) return;
+    gScan.active=true; gScan.id=nearGhost.id; gScan.progress=0;
+    ship.vx=ship.vy=0;
+    progLabel.text='SALVAGING WRECK...';
+    scanPrompt.visible=false; progressBar.visible=true;
+  }
+
+  function completeGhostScan() {
+    gScan.active=false; progressBar.visible=false;
+    // Grab credits before removing the record
+    const ghostRecord=ghostShips.find(g=>g.id===gScan.id);
+    const recoveredCr=(ghostRecord&&ghostRecord.credits)||0;
+    // Remove from persistence
+    ghostShips=ghostShips.filter(g=>g.id!==gScan.id);
+    try{ localStorage.setItem('signal_ghosts',JSON.stringify(ghostShips)); }catch(_){}
+    // Remove from world
+    const ag=activeGhosts.find(g=>g.id===gScan.id);
+    if(ag){ ghostLayer.removeChild(ag.container); activeGhosts=activeGhosts.filter(g=>g.id!==gScan.id); }
+    nearGhost=null;
+    if(recoveredCr>0){ credits+=recoveredCr; updateCreditsHud(); }
+    // Give cargo item
+    const slot=ship.cargo.findIndex(s=>s===null);
+    if(slot!==-1){ ship.cargo[slot]='Ship Loot'; refreshCargoHud(); }
+    // Show ghost result card
+    const fmt=n=>n>=1e6?`${(n/1e6).toFixed(1)}M`:n>=1000?`${(n/1000).toFixed(1)}k`:n.toLocaleString();
+    ghostCardPrevSigPhase=sig.phase; cardType='ghost'; sig.phase='card';
+    cardBg.clear();
+    cardBg.roundRect(-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10); cardBg.fill({color:0x040a12});
+    cardBg.roundRect(-CARD_W/2,-CARD_H/2,CARD_W,CARD_H,10); cardBg.stroke({color:0xff4422,alpha:0.5,width:1.5});
+    cardHeader.text='LOST VESSEL';          cardHeader.style.fill='#ff5533';
+    cardTitle.text='"SHIP LOOT" SECURED';
+    cardBody.text='Emergency fuel cells found intact.\nWorth a full tank when sold.';
+    const crLine=recoveredCr>0?`▸ ${fmt(recoveredCr)} cr recovered from pilot`:'▸ No credits found on wreck';
+    cardCargoLine.text=(slot!==-1?'▸ Ship Loot added to cargo\n':'▸ Cargo full — no room for loot\n')+crLine;
+    cardCargoLine.style.fill=slot!==-1?'#66cc88':'#cc6644';
+    cardLayer.visible=true;
+  }
+
+  function showGameOver(reason='fuel'){
+    recordDeath();
+    goDepth.text=`DEPTH  ${depth}   ·   ${credits.toLocaleString()} cr`;
+    goSub.text = reason==='hull'
+      ? 'Your hull disintegrated in the dust cloud.'
+      : 'You ran out of fuel in deep space.';
+    gameOverLayer.visible=true;
+  }
+
+  function restart(){
+    depth=0;fuel=100;credits=500;hull=100;cargoUpgrades=0;jumpUpgrades=0;
+    cloudTint=0;cloud.active=false;cloudContainer.visible=false;shipContainer.tint=0xffffff;shipContainer.scale.set(1,1);
+    flare.phase='idle';flare.countdown=999999;flareFx.clear();
+    ship.cargo=[null,null,null];ship.angle=0;ship.spin=0;homeExitFrames=0;
+    ship.wx=0;ship.wy=0;ship.vx=0;ship.vy=0;
+    warp.active=false;warp.flashAlpha=0;warp.pendingGameOver=false;
+    warpCooldown=0;dock.active=false;
+    cardLayer.visible=false;dockLayer.visible=false;shipyardLayer.visible=false;gameOverLayer.visible=false;
+    cardType='signal'; scanMode='signal'; nearGhost=null;
+    clearGhosts();
+    refreshCargoHud();updateCreditsHud();applyDepthTheme();spawnSystem();updateDepthFuelHUD();
+  }
+
+  // ─── Solar flare update ───────────────────────────────────
+  function updateFlare(dt) {
+    flareFx.clear();
+    flare.timer += dt;
+
+    const col    = cfg().accent;
+    const colStr = `#${col.toString(16).padStart(6,'0')}`;
+
+    // ── Idle: wait for countdown ──
+    if(flare.phase==='idle'){
+      flare.countdown -= dt;
+      if(flare.countdown <= 0){
+        flare.phase      = 'warn';
+        flare.timer      = 0;
+        flare.warnsNeeded= 2 + Math.floor(Math.random()*2); // 2 or 3
+        flare.sx         = systemStarContainer.x;
+        flare.sy         = systemStarContainer.y;
+      }
+      return;
+    }
+
+    // ── Warn: N sequential pulsing rings ──
+    if(flare.phase==='warn'){
+      const totalWarn = flare.warnsNeeded * WARN_CYCLE;
+      if(flare.timer >= totalWarn){
+        flare.phase='charge'; flare.timer=0; return;
+      }
+      // Draw each pulse ring that has started
+      for(let i=0;i<flare.warnsNeeded;i++){
+        const age = flare.timer - i*WARN_CYCLE;
+        if(age<0||age>WARN_RING) continue;
+        const p = age/WARN_RING;              // 0→1
+        const r = 6 + p*110;                 // ring radius
+        const a = (1-p)*(0.55-i*0.05);       // fades as it expands; later pulses slightly fainter
+        flareFx.circle(flare.sx, flare.sy, r);
+        flareFx.stroke({color:col, alpha:a, width:2.5-p*1.5});
+        // Bright core flash at the star for the first ~15 frames of each pulse
+        if(age<15 && systemStarCore){
+          const flash=(1-(age/15));
+          systemStarCore.alpha=0.9+flash*0.8; // briefly spike brightness
+        }
+      }
+      return;
+    }
+
+    // ── Charge: silent pause before the main event ──
+    if(flare.phase==='charge'){
+      if(flare.timer>=CHARGE_DUR){ flare.phase='main'; flare.timer=0;
+        flare.maxR=Math.ceil(Math.max(
+          Math.hypot(flare.sx, flare.sy),
+          Math.hypot(app.screen.width-flare.sx, flare.sy),
+          Math.hypot(flare.sx, app.screen.height-flare.sy),
+          Math.hypot(app.screen.width-flare.sx, app.screen.height-flare.sy)
+        ))+10;
+      }
+      return;
+    }
+
+    // ── Main flare: expands to fill the entire screen ──
+    if(flare.phase==='main'){
+      if(flare.timer>=FLARE_EXP){ flare.phase='fade'; flare.timer=0; return; }
+      const t  = flare.timer/FLARE_EXP;
+      const p  = Math.pow(t, 0.55);               // eased progress 0→1
+      flare.mainR = flare.maxR * p;
+
+      // Colour fill behind the wavefront — brightens as ring spreads
+      flareFx.circle(flare.sx, flare.sy, flare.mainR);
+      flareFx.fill({color:col, alpha: p*0.22});
+
+      // White tint — peaks when ring covers screen
+      flareFx.circle(flare.sx, flare.sy, flare.mainR);
+      flareFx.fill({color:0xffffff, alpha: p*0.13});
+
+      // Wavefront ring — bright, thickens as it expands
+      flareFx.circle(flare.sx, flare.sy, flare.mainR);
+      flareFx.stroke({color:0xffffff, alpha:0.55+p*0.40, width:3+p*14});
+
+      return;
+    }
+
+    // ── Fade: screen returns to normal ──
+    if(flare.phase==='fade'){
+      if(flare.timer>=FLARE_FADE){
+        flare.phase='idle'; flare.timer=0;
+        flare.countdown=flareCountdown();
+        return;
+      }
+      const f = 1 - flare.timer/FLARE_FADE;       // 1→0
+
+      flareFx.circle(flare.sx, flare.sy, flare.maxR);
+      flareFx.fill({color:col, alpha:f*0.22});
+
+      flareFx.circle(flare.sx, flare.sy, flare.maxR);
+      flareFx.fill({color:0xffffff, alpha:f*0.13});
+
+      flareFx.circle(flare.sx, flare.sy, flare.maxR);
+      flareFx.stroke({color:0xffffff, alpha:f*0.95, width:3+14*f});
+    }
+  }
+
+  // ─── Boot ────────────────────────────────────────────────
+  let pulseTime=0;
+  applyDepthTheme(); // also calls buildSystemStar + positionUI fires on resize
+  spawnSystem();
+  updateDepthFuelHUD();
+
+  // ─── Game loop ───────────────────────────────────────────
+  const SIG_VIS=700,ARRIVAL=200,SCAN_R=100,DOCK_R=90,SCAN_DUR=3*60;
+  let padBlink=0;
+
+  app.ticker.add(ticker=>{
+    const dt=ticker.deltaTime;
+    const uiLock=sig.phase==='scanning'||sig.phase==='card'||dock.active||gameOverLayer.visible;
+    const inLock=uiLock||warp.active;
+
+    // Cloud state — computed before physics so it can affect thrust/speed this frame
+    const inCloud = cloud.active && !warp.active &&
+      Math.hypot(ship.wx-cloud.wx, ship.wy-cloud.wy) < cloud.radius;
+    const cloudMult = inCloud ? 0.42 : 1.0;
+
+    if(!inLock){
+      let rot=0;
+      if(pressed('ArrowLeft','a'))rot-=1;if(pressed('ArrowRight','d'))rot+=1;
+      if(jState.active)rot+=jState.dx;
+      ship.angle+=rot*ROTATE_SPEED*dt;
+      const thr=pressed('ArrowUp','w')||tState.active;
+      if(thr){ship.vx+=Math.sin(ship.angle)*THRUST*cloudMult*dt;ship.vy-=Math.cos(ship.angle)*THRUST*cloudMult*dt;}
+      flameGfx.visible=thr;
+      if(thr){flameGfx.alpha=0.65+0.35*Math.random();flameGfx.scale.y=0.85+0.30*Math.random();}
+    }else{flameGfx.visible=false;}
+
+    if(warp.active&&!uiLock){
+      warp.timer+=dt;
+      if(warp.dest==='home'){
+        // Accelerate stars — cubic ramp up to 5× warp speed
+        const t=warp.timer/warp.duration;
+        const accel=1+t*t*t*4;
+        ship.vx=warp.vx*accel; ship.vy=warp.vy*accel;
+      }else{
+        ship.vx=warp.vx;ship.vy=warp.vy;
+      }
+      if(warp.timer>=warp.duration)completeJump();
+    }else if(!uiLock){
+      if(warpCooldown>0)warpCooldown=Math.max(0,warpCooldown-dt);
+      const drag=Math.pow(DRAG,dt);ship.vx*=drag;ship.vy*=drag;
+    }
+    const spd=Math.hypot(ship.vx,ship.vy);
+    // After home exit, max speed ramps from 3× down to normal over 2 s
+    if(homeExitFrames>0)homeExitFrames=Math.max(0,homeExitFrames-dt);
+    const exitMult=homeExitFrames>0?1+2*(homeExitFrames/120):1;
+    const maxSpd=inCloud?MAX_SPEED*0.38:MAX_SPEED*exitMult;
+    if(!warp.active&&spd>maxSpd){ship.vx=ship.vx/spd*maxSpd;ship.vy=ship.vy/spd*maxSpd;}
+    ship.wx+=ship.vx;ship.wy+=ship.vy;
+
+    // Post-hyperspace tumble — spin decays each frame
+    if(ship.spin!==0&&!uiLock){
+      ship.angle+=ship.spin*dt;
+      ship.spin*=Math.pow(0.976,dt);
+      if(Math.abs(ship.spin)<0.0002)ship.spin=0;
+    }
+    shipContainer.rotation=ship.angle;
+
+    // Irregular star twinkle — three incommensurable frequencies, no perceived rhythm
+    starPulseT+=dt*0.012;
+    if(systemStarCore){
+      const p=Math.sin(starPulseT)*0.45+Math.sin(starPulseT*1.732+1.1)*0.35+Math.sin(starPulseT*2.618+2.4)*0.20;
+      systemStarCore.alpha=0.78+p*0.22; // roughly 0.73 – 1.00
+    }
+
+    // Home-warp stretch: parabolic (t^4 keeps ship normal-looking until the final surge)
+    if(warp.active&&warp.dest==='home'){
+      const t=warp.timer/warp.duration;
+      const maxS=app.screen.width/40;
+      const s=1+(maxS-1)*Math.pow(t,4);
+      shipContainer.scale.set(Math.max(0.12,1/Math.sqrt(s)),s);
+    }else{
+      shipContainer.scale.set(1,1);
+    }
+
+    for(const{cfg:c,stars}of starLayers){
+      const sx=ship.vx*c.parallax,sy=ship.vy*c.parallax;
+      const W=app.screen.width,H=app.screen.height;
+      for(const s of stars){
+        s.x-=sx;s.y-=sy;
+        if(s.x<-4)s.x+=W+8;else if(s.x>W+4)s.x-=W+8;
+        if(s.y<-4)s.y+=H+8;else if(s.y>H+4)s.y-=H+8;
+      }
+    }
+
+    // Warp motion-blur streaks
+    if(warp.active){
+      warpFx.clear();
+      const starCol = cfg().stars;
+      // Ramp alpha up in first 12 frames, hold, fade out in last 20
+      const ramp = Math.min(1, warp.timer/12) * Math.min(1,(warp.duration-warp.timer)/20);
+      for(const{cfg:lc,stars,container}of starLayers){
+        // Trail extends back to where each star was ~2.5 frames ago
+        const tx = warp.vx * lc.parallax * 2.5;
+        const ty = warp.vy * lc.parallax * 2.5;
+        const sw = (lc.sizeMin+lc.sizeMax)*0.35;
+        const la = (lc.alphaMin+lc.alphaMax)*0.5 * ramp;
+        container.alpha = 1 - ramp * 0.55; // dim dots as streaks appear
+        for(const s of stars){
+          warpFx.moveTo(s.x, s.y);
+          warpFx.lineTo(s.x+tx, s.y+ty);
+        }
+        warpFx.stroke({color:starCol, alpha:la, width:sw});
+      }
+    }else{
+      warpFx.clear();
+      for(const{container}of starLayers) container.alpha=1;
+    }
+
+    // System star — world position with tiny parallax, shrinks during jump
+    systemStarContainer.x=app.screen.width/2  + (sysStar.wx-ship.wx)*STAR_PARALLAX;
+    systemStarContainer.y=app.screen.height/2 + (sysStar.wy-ship.wy)*STAR_PARALLAX;
+    if(warp.active){
+      const t=warp.timer/warp.duration;
+      systemStarContainer.scale.set(Math.max(0.04, 1-Math.pow(t,0.7)*0.96));
+    }else{
+      systemStarContainer.scale.set(1);
+    }
+
+    // ── Cloud ──
+    if(cloud.active){
+      cloudContainer.x=app.screen.width/2+(cloud.wx-ship.wx);
+      cloudContainer.y=app.screen.height/2+(cloud.wy-ship.wy);
+    }
+    if(inCloud&&!uiLock){
+      const dmgPerSec=Math.max(0.6,(depth-3)*0.55);
+      hull=Math.max(0,hull-dmgPerSec/60*dt);
+      refreshHullHud();
+      if(hull<=0&&!gameOverLayer.visible) showGameOver('hull');
+    }
+    // Smooth ship colour tint into/out of cloud
+    cloudTint+=(((inCloud&&cloud.active)?1:0)-cloudTint)*Math.min(1,dt*0.04);
+    if(cloudTint>0.005){
+      const ct=cloudTint;
+      const dr=(cloud.domTint>>16)&0xff, dg=(cloud.domTint>>8)&0xff, db=cloud.domTint&0xff;
+      const r=Math.round(255*(1-ct)+dr*ct);
+      const g=Math.round(255*(1-ct)+dg*ct);
+      const b=Math.round(255*(1-ct)+db*ct);
+      shipContainer.tint=(r<<16)|(g<<8)|b;
+    }else{shipContainer.tint=0xffffff;}
+
+    // Planet
+    if(systemHasPlanet){
+      const pdx=planet.wx-ship.wx,pdy=planet.wy-ship.wy;
+      planetContainer.x=app.screen.width/2+pdx;planetContainer.y=app.screen.height/2+pdy;
+      const pd=Math.hypot(pdx,pdy);
+      pHudArrow.rotation=Math.atan2(pdx,-pdy);
+      planetDistT.text=pd>=1000?`${(pd/1000).toFixed(1)}ku`:`${Math.round(pd)}u`;
+      padBlink+=dt*0.06;padContainer.alpha=0.55+0.45*Math.abs(Math.sin(padBlink));
+      const paDist=Math.hypot(pad.wx-ship.wx,pad.wy-ship.wy);
+      dockPrompt.visible=!dock.active&&!dockLayer.visible&&paDist<DOCK_R&&!gameOverLayer.visible&&!warp.active;
+    }else{dockPrompt.visible=false;}
+
+    // ── Ghost ships ──
+    nearGhost = null;
+    let nearGhostDist = Infinity;
+    for(const g of activeGhosts){
+      const gdx=g.wx-ship.wx, gdy=g.wy-ship.wy;
+      g.container.x=app.screen.width/2+gdx;
+      g.container.y=app.screen.height/2+gdy;
+      // Pulse animation on the two rings (children 0 and 1)
+      g.pulse+=dt*0.025;
+      const p=(Math.sin(g.pulse)+1)/2;
+      g.container.children[0].alpha=0.10+0.25*p;
+      g.container.children[1].alpha=0.30+0.40*p;
+      g.container.children[0].scale.set(1+0.12*p);
+      const d=Math.hypot(gdx,gdy);
+      if(d<SCAN_R&&d<nearGhostDist){ nearGhost=g; nearGhostDist=d; }
+    }
+    // Ghost-priority HUD compass
+    if(activeGhosts.length>0&&hudC.visible){
+      let ng=activeGhosts[0], nd=Infinity;
+      for(const g of activeGhosts){ const d=Math.hypot(g.wx-ship.wx,g.wy-ship.wy); if(d<nd){nd=d;ng=g;} }
+      applyHudMode('ghost');
+      hudArrow.rotation=Math.atan2(ng.wx-ship.wx,-(ng.wy-ship.wy));
+      distText.text=nd>=1000?`${(nd/1000).toFixed(1)}ku`:`${Math.round(nd)}u`;
+      sigLabel.text='GHOST';
+    } else if(activeGhosts.length===0&&hudMode==='ghost'){
+      applyHudMode('signal');
+    }
+    // Ghost scan in progress
+    if(gScan.active&&!uiLock){
+      gScan.progress+=dt/SCAN_DUR;
+      if(gScan.progress>=1){gScan.progress=1;completeGhostScan();}
+      progFill.clear();
+      progFill.roundRect(-PROG_W/2,-PROG_H/2,PROG_W*gScan.progress,PROG_H,5);
+      progFill.fill({color:0xff5533});
+    }
+    // Ghost scan prompt (only when no other modal and not already scanning)
+    if(!gScan.active&&nearGhost&&!dock.active&&!dockLayer.visible&&!cardLayer.visible&&!gameOverLayer.visible&&sig.phase!=='scanning'&&!warp.active){
+      scanPrompt.visible=true;
+      scanVerb.text='SALVAGE';
+      scanMode='ghost';
+    } else if(scanMode==='ghost'&&(!nearGhost||gScan.active)){
+      if(!nearGhost&&!gScan.active) scanPrompt.visible=false;
+      scanMode='signal';
+    }
+
+    // Signal
+    if(systemHasSignals&&sig.phase!=='idle'){
+      const sdx=signal.wx-ship.wx,sdy=signal.wy-ship.wy;
+      const dist=Math.hypot(sdx,sdy);
+      signalContainer.x=app.screen.width/2+sdx;signalContainer.y=app.screen.height/2+sdy;
+
+      if(sig.phase==='signal'){
+        signalContainer.alpha=dist<SIG_VIS?Math.min(1,(SIG_VIS-dist)/200):0;
+        if(dist<ARRIVAL)reveal();
+        pulseTime+=dt*0.022;
+        const p1=(Math.sin(pulseTime)+1)/2,p2=(Math.sin(pulseTime+2.1)+1)/2,p3=(Math.sin(pulseTime*1.3+1)+1)/2;
+        sweepRing.alpha=0.08+0.18*p1;sweepRing.scale.set(1+0.18*p1);
+        midRing.alpha=0.25+0.35*p2;midRing.scale.set(1+0.08*p2);
+        innerRing.alpha=0.55+0.45*p3;centreGlow.alpha=0.18+0.22*p1;qMark.alpha=0.55+0.45*p3;
+        // Only update signal arrow when no ghosts are claiming the compass
+        if(activeGhosts.length===0){
+          applyHudMode('signal');
+          hudArrow.rotation=Math.atan2(sdx,-sdy);
+          distText.text=dist>=1000?`${(dist/1000).toFixed(1)}ku`:`${Math.round(dist)}u`;
+        }
+      }else if(sig.phase==='revealed'){
+        signalContainer.alpha=1;
+        if(sig.type==='alien'){pulseTime+=dt*0.022;revealedContainer.rotation+=alienRotSpeed*dt;revealedContainer.alpha=0.82+0.18*Math.sin(pulseTime*2.5);}
+        else if(sig.type==='derelict'&&flickerParts.length){if(Math.random()<0.04){const a=rand(0.25,1);flickerParts.forEach(p=>p.alpha=a);}}
+        // Only show signal prompt if ghost isn't already claiming it
+        if(scanMode!=='ghost'){
+          scanPrompt.visible=dist<SCAN_R&&!gameOverLayer.visible&&!warp.active;
+          if(dist<SCAN_R) scanMode='signal';
+        }
+      }else if(sig.phase==='scanning'){
+        signalContainer.alpha=1;
+        if(sig.type==='alien'){pulseTime+=dt*0.022;revealedContainer.rotation+=alienRotSpeed*dt;}
+        sig.scanProgress+=dt/SCAN_DUR;
+        if(sig.scanProgress>=1){sig.scanProgress=1;completeScan();}
+        progFill.clear();
+        if(sig.scanProgress>0){progFill.roundRect(-PROG_W/2,-PROG_H/2,PROG_W*sig.scanProgress,PROG_H,5);progFill.fill({color:TYPE_COLOR[sig.type]});}
+      }else if(sig.phase==='card'){signalContainer.alpha=1;}
+    }
+
+    // Solar flare
+    if(depth>=2&&!warp.active) updateFlare(dt);
+    else flareFx.clear();
+
+    // Warp button feedback
+    const wr=!warp.active&&warpCooldown<=0;
+    warpBtn.alpha=uiLock?0.25:warp.active?1.0:wr?0.75:0.2+0.55*(1-warpCooldown/WARP_COOLDOWN);
+    thrustBtnGfx.alpha=tState.active?1.0:0.65;
+
+    // Warp overlay
+    warpOverlay.clear();
+    const W2=app.screen.width,H2=app.screen.height;
+    if(warp.active){
+      const t=1-warp.timer/warp.duration;
+      warpOverlay.rect(3,3,W2-6,H2-6);warpOverlay.stroke({color:0x00ccff,alpha:0.55*t,width:10});
+      warpOverlay.rect(16,16,W2-32,H2-32);warpOverlay.stroke({color:0x00ccff,alpha:0.25*t,width:5});
+    }else if(warp.flashAlpha>0){
+      warp.flashAlpha=Math.max(0,warp.flashAlpha-dt*0.045);
+      warpOverlay.rect(0,0,W2,H2);warpOverlay.fill({color:0xffffff,alpha:warp.flashAlpha*0.85});
+      if(warp.flashAlpha<=0&&warp.pendingGameOver){warp.pendingGameOver=false;showGameOver();}
+    }
+  });
+
+  window.addEventListener('resize',()=>{positionShip();positionUI();});
+</script>
+</body>
+</html>
